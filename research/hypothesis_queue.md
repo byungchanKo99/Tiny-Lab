@@ -1,8 +1,4 @@
-# Hypotheses — public starter queue
+# DEPRECATED — migrated to hypothesis_queue.yaml
 
-These are example hypotheses for the shipped MLX trainer in `examples/mlx/train.py`.
-Keep each run to one flag change relative to the current baseline.
-
-- [ ] Lower `--learning-rate` from `0.02` to `0.01` and compare `best_val_bpb` after `120` steps.
-- [ ] Lower `--dim` from `64` to `32` and compare `best_val_bpb` after `120` steps.
-- [ ] Raise `--batch-size` from `128` to `256` and compare `best_val_bpb` after `120` steps.
+This file is kept for backward compatibility with `bin/research-trigger.sh`.
+The deterministic research loop (`bin/research_loop.py`) uses `research/hypothesis_queue.yaml` instead.

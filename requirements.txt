@@ -1,3 +1,4 @@
 mlx>=0.29
 numpy>=2.0
 pytest>=8.0
+pyyaml>=6.0

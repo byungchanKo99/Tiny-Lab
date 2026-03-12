@@ -1,159 +1,150 @@
 # tiny-lab
 
-`tiny-lab` is a small Apple Silicon experiment tool. It ships one real MLX trainer, one hardened `surface` control plane, one real eval bundle, and one optional research trigger. The public 1.0 path is single-machine only: configure one local lane, launch a run, stop it safely, score the checkpoint, and keep a small hypothesis queue.
+Deterministic AI-driven research loop. Define levers, set a metric, and let the loop run experiments automatically.
 
-## Who It Is For
-
-Use `tiny-lab` if you want a direct local workflow for tiny language-model experiments on one Apple Silicon machine. It is not a cluster manager, not a general scheduler, and not a full reproduction of the private lab it came from.
-
-## What Ships
-
-- `bin/surface` — the control plane: `list`, `run`, `status --verbose`, `stop`, `doctor`, and `board --json`
-- `examples/mlx/train.py` — the shipped MLX backend example
-- `ane/eval_tiny.py` — NumPy evaluator
-- `ane/eval_tiny_mlx.py` — MLX cross-check evaluator
-- `ane/eval_bundle/` — public eval bundle, including the TinyStories held-out slice used for bpb scoring
-- `config/tiny_lab_lanes.tsv` — the single shipped local lane
-- `research/` — a small public queue, ledger, questions, levers, and agent prompt
-- `bin/research-trigger.sh` — optional advanced trigger for a `claude`-driven queue cycle
-
-## What `surface` Does
-
-`surface` manages one or more lanes. In 1.0, the shipped lane is local and file-based. `surface` launches commands in the lane workdir, records `run.json` and `state.json`, keeps a small SQLite index, reports the current truth source, stops runs with an early-stop token plus process kill fallback, and repairs stale state with `doctor --fix`.
-
-## What `eval` Does
-
-`ane/eval_tiny.py` is the canonical scorer. It loads the binary checkpoint format used by the shipped trainer, computes bits per byte on a fixed held-out bundle, emits a word score, and writes a JSON report. `ane/eval_tiny_mlx.py` runs the same checkpoint through MLX and can compare MLX against the NumPy scorer.
-
-## ANE Status
-
-`tiny-lab` 1.0 does not ship a public ANE training path.
-
-- the public repo ships `ane/` evaluators and tokenizer assets only
-- the default and only supported training quickstart is the MLX path in `examples/mlx/`
-- the private working ANE system depends on lower-level primitives, vendor code, and build steps that are not part of this public repo
-
-If you see `ane/` in this repo, read it as evaluation tooling for the shared checkpoint format, not as a supported ANE trainer.
-
-## Quickstart
-
-Run these from the repo root on Apple Silicon:
+## Install
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -r requirements.txt
-python3 bin/surface list
-python3 bin/surface status tiny-gpu --verbose
+pip install git+https://github.com/byungchanko/Tiny-Lab.git
 ```
 
-The shipped lane is defined in `config/tiny_lab_lanes.tsv` and points at `examples/mlx/`. You can use it as-is, or edit that one row if you want a different lane name or workdir.
-
-Launch one real run:
+## 30-Second Setup (Claude Code)
 
 ```bash
-python3 bin/surface run tiny-gpu \
-  "python3 train.py --steps 120 --eval-every 20 --save-every 20 --checkpoint-out tiny_weights.bin" \
-  --name quickstart \
-  --eval-on-checkpoint ane/eval_tiny.py
+tiny-lab setup    # Install /research command globally
 ```
 
-Inspect what happened:
+Then in any project directory:
+
+```
+/research 호텔 가격 최적화하고 싶어
+```
+
+Claude will ask what metric to optimize, what variables to experiment with, where the data is — then set up everything and start running.
+
+## Manual Setup
 
 ```bash
-python3 bin/surface status tiny-gpu --verbose
-python3 bin/surface board --json
-python3 bin/surface doctor tiny-gpu
+mkdir my-experiment && cd my-experiment
+tiny-lab init              # Scaffold project files
+vim research/project.yaml  # Configure your experiment
+tiny-lab run               # Start the loop (Ctrl+C to stop)
 ```
 
-Evaluate the checkpoint directly:
+## How It Works
 
-```bash
-python3 ane/eval_tiny.py \
-  --checkpoint examples/mlx/tiny_weights.bin \
-  --tokenizer ane/primitives/bpe_vocab_512.bin \
-  --eval-bundle ane/eval_bundle \
-  --out examples/mlx/quickstart_eval.json
-
-python3 ane/eval_tiny_mlx.py \
-  --checkpoint examples/mlx/tiny_weights.bin \
-  --tokenizer ane/primitives/bpe_vocab_512.bin \
-  --eval-bundle ane/eval_bundle \
-  --compare
+```
+┌─ CHECK_QUEUE ──→ SELECT ──→ BUILD_COMMAND ──→ RUN ──→ EVALUATE ──→ RECORD ─┐
+│                                                                              │
+│  (queue empty)                                                               │
+└──→ GENERATE (AI creates new hypotheses) ──→ back to CHECK_QUEUE ────────────┘
 ```
 
-Test safe stop in a second terminal:
+1. **Pick** a hypothesis from the queue
+2. **Build** the experiment command (replace CLI flags, modify code, or run a script)
+3. **Run** the experiment
+4. **Evaluate** the result (parse stdout JSON, run eval script, or AI scoring)
+5. **Record** WIN/LOSS/INVALID to the ledger
+6. **Repeat** until stopped
 
-```bash
-python3 bin/surface run tiny-gpu \
-  "python3 train.py --steps 1000 --eval-every 25 --save-every 25 --sleep 0.1 --checkpoint-out tiny_weights.bin" \
-  --name stop-demo \
-  --eval-on-checkpoint ane/eval_tiny.py
+## CLI Commands
+
+| Command             | Description                                  |
+| ------------------- | -------------------------------------------- |
+| `tiny-lab init`     | Scaffold a new experiment project            |
+| `tiny-lab setup`    | Install `/research` for Claude Code globally |
+| `tiny-lab run`      | Start the research loop                      |
+| `tiny-lab status`   | Show current loop state                      |
+| `tiny-lab stop`     | Stop a running loop                          |
+| `tiny-lab board`    | Show experiment results dashboard            |
+| `tiny-lab generate` | Generate new hypotheses via AI               |
+
+## Project Structure (after `tiny-lab init`)
+
+```
+your-project/
+  CLAUDE.md                              # Agent guide (auto-generated)
+  research/
+    project.yaml                         # Experiment config
+    hypothesis_queue.yaml                # What to try next
+    questions.yaml                       # Research questions
+    ledger.jsonl                         # Results log
+  .claude/
+    commands/research.md                 # /research command
+    agents/
+      hypothesis-generator.md            # Generates hypotheses
+      code-modifier.md                   # Modifies code (build.type: code)
+      ux-evaluator.md                    # Scores artifacts (evaluate.type: llm)
 ```
 
-Then stop it:
+## project.yaml Example
 
-```bash
-python3 bin/surface stop tiny-gpu
-python3 bin/surface doctor tiny-gpu
+```yaml
+name: hotel-pricing
+description: "Optimize hotel RevPAR by adjusting pricing parameters"
+
+build:
+  type: flag # flag | script | code
+
+run:
+  type: command # surface | command | pipeline
+
+evaluate:
+  type: stdout_json # stdout_json | script | llm
+
+baseline:
+  command: "python3 pricing_model.py --rate-adj 1.0 --season-weight 0.5"
+
+metric:
+  name: revpar
+  direction: maximize # minimize | maximize
+
+levers:
+  rate_adjustment:
+    flag: "--rate-adj"
+    baseline: 1.0
+    space: [0.8, 0.9, 1.0, 1.1, 1.2]
+  season_weight:
+    flag: "--season-weight"
+    baseline: 0.5
+    space: [0.3, 0.5, 0.7, 1.0]
+
+rules:
+  - "Change command-line flags only"
+  - "Do not install packages"
 ```
 
-## Hypotheses
+Your experiment script must print the metric as JSON to stdout:
 
-The optional research path is file-based. Add a new line to `research/hypothesis_queue.md` with the format `- [ ] your hypothesis here`. The shipped queue and ledger are built around the MLX example in `examples/mlx/train.py`.
-
-If you have a working `claude` CLI, you can ask the optional trigger to process one queue cycle:
-
-```bash
-bash bin/research-trigger.sh
+```json
+{ "revpar": 142.5 }
 ```
 
-If `claude` is missing or no hypotheses are pending, the script prints a skip reason and exits without launching anything.
+## Plugin Types
 
-## Config
+| Phase    | Type          | Description                             | Needs AI? |
+| -------- | ------------- | --------------------------------------- | --------- |
+| BUILD    | `flag`        | Replace CLI flags in baseline command   | No        |
+| BUILD    | `script`      | Use predefined script per lever:value   | No        |
+| BUILD    | `code`        | AI modifies source code                 | Yes       |
+| RUN      | `command`     | Direct shell execution                  | No        |
+| RUN      | `surface`     | Via surface control plane               | No        |
+| RUN      | `pipeline`    | Multi-step with background processes    | No        |
+| EVALUATE | `stdout_json` | Parse metric from stdout                | No        |
+| EVALUATE | `script`      | Run separate eval script                | No        |
+| EVALUATE | `llm`         | AI scores artifacts (screenshots, HTML) | Yes       |
 
-`config/tiny_lab_lanes.tsv` is the one obvious place to edit local lane settings. The columns are:
+## Requirements
 
-`target|machine|protocol|host|workdir|backend|lane|mode|capabilities`
+- Python 3.10+
+- [Claude Code](https://claude.ai/claude-code) (for `/research` command and AI features)
 
-1.0 supports only local `file` lanes in the shipped config. Remote SSH lanes are out of scope for this release.
+## Legacy
 
-## Eval Bundle Provenance
-
-`ane/eval_bundle/heldout.txt` is a 100,574-byte held-out slice from the public TinyStories dataset. The dataset card lists the license as `cdla-sharing-1.0`. The repo preserves the attribution and license link in `ane/eval_bundle/README.md`.
-
-## Optional Vs Core
-
-Core 1.0 path:
-
-- `bin/surface`
-- `examples/mlx/train.py`
-- `ane/eval_tiny.py`
-- `ane/eval_tiny_mlx.py`
-- `config/tiny_lab_lanes.tsv`
-
-Optional:
-
-- `bin/research-trigger.sh`
-- `research/` queue automation
-- editing the shipped lane map for your own trainer/workdir
-
-Experimental or advanced notes:
-
-- private ANE training exists in the source system, but it is not a shipped 1.0 path here
-
-## Out Of Scope
-
-- remote SSH lanes
-- public ANE training support
-- multi-machine orchestration
-- public checkpoint hosting
-- general scheduler abstractions
+This repo also contains the original `bin/surface` control plane and `examples/mlx/` trainer from the 1.0 release. See `bin/surface --help` for the original experiment tooling. The `tiny-lab` CLI is the v2 interface built on top.
 
 ## Credits
 
-- Trevin Peterson — author of the extraction, tiny-lab system design, and related `autoresearch-mlx` work
-- Andrej Karpathy — `autoresearch`, `nanochat`, and the broader research-loop framing this repo builds on
-- `danpacary` / `ncdrone`, `maderix`, `miolini`, and the Apple MLX team — key upstream and adjacent implementation work
-
-Full attribution lives in `CREDITS.md`.
+- Trevin Peterson — original tiny-lab system design
+- Andrej Karpathy — `autoresearch` and the research-loop framing
+- Full attribution in `CREDITS.md`

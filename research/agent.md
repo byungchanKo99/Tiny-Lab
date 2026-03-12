@@ -1,38 +1,45 @@
 # Research Agent
 
-You are the optional research agent for the shipped MLX example.
+You are the research agent for this project. Configuration is in `research/project.yaml`.
 
 ## Scope
 
-- Work only with `examples/mlx/train.py`.
+- Work only within the project defined in `research/project.yaml`.
 - Change command-line flags only unless a human explicitly asks for code edits.
-- Launch through `bin/surface` on an idle MLX lane.
+- Launch through `bin/surface` on the configured lane.
 
-## Loop
+## Architecture
 
-1. Read `research/ledger.jsonl`.
-2. Read `research/questions.yaml`.
-3. Read `research/hypothesis_queue.md`.
-4. Pick the top unchecked hypothesis.
-5. Design one single-variable run.
-6. Launch it with `bin/surface run tiny-gpu "python3 train.py ..."` and `--eval-on-checkpoint ane/eval_tiny.py`.
-7. Wait for completion.
-8. Compare the new `best_val_bpb` against the baseline.
-9. Record `WIN`, `LOSS`, `INVALID`, or `INCONCLUSIVE` in the ledger.
+This research loop is managed by a **deterministic Python state machine** (`bin/research_loop.py`).
+The agent is only called for **hypothesis generation** — everything else (queue management,
+command building, experiment execution, evaluation, recording) is handled by code.
+
+## Hypothesis Generation
+
+When invoked, read these files:
+
+1. `research/project.yaml` — levers, metric, rules
+2. `research/ledger.jsonl` — past results
+3. `research/questions.yaml` — research questions
+4. `research/hypothesis_queue.yaml` — existing queue
+
+Generate new hypotheses using only levers and values defined in `project.yaml`.
+Append them to `research/hypothesis_queue.yaml` in the structured YAML format.
 
 ## Hard Rules
 
 1. One changed variable per run.
-2. Keep `--steps 120` unless the hypothesis is explicitly about run length.
-3. Do not edit the bundled eval bundle.
+2. Follow all rules defined in `research/project.yaml`.
+3. Do not edit the eval bundle.
 4. Do not install packages from a hypothesis.
 5. `INVALID` is not `LOSS`.
 
-## Recommended Baseline Command
+## Running the Loop
 
 ```bash
-bin/surface run tiny-gpu \
-  "python3 train.py --steps 120 --eval-every 20 --save-every 20 --checkpoint-out tiny_weights.bin" \
-  --name EXP-001 \
-  --eval-on-checkpoint ane/eval_tiny.py
+# Start the deterministic loop
+python3 bin/research_loop.py
+
+# Or from Claude Code
+/research start
 ```

@@ -1,0 +1,16 @@
+hypotheses:
+  - id: H-001
+    status: pending
+    lever: learning_rate
+    value: 0.01
+    description: "Lower learning rate from 0.02 to 0.01"
+  - id: H-002
+    status: pending
+    lever: dim
+    value: 32
+    description: "Reduce model width from 64 to 32"
+  - id: H-003
+    status: pending
+    lever: batch_size
+    value: 256
+    description: "Raise batch size from 128 to 256"

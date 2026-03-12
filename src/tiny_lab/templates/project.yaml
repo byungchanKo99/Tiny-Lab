@@ -1,0 +1,36 @@
+name: my-experiment
+description: "Describe your experiment here"
+
+# lane: my-lane           # Optional: surface lane name
+# workdir: .              # Optional: working directory for commands
+
+build:
+  type: flag # flag | script | code
+
+run:
+  type: command # surface | command | pipeline
+
+evaluate:
+  type: stdout_json # stdout_json | script | llm
+
+baseline:
+  command: "python3 train.py --epochs 10"
+
+metric:
+  name: metric_name
+  source: stdout_json
+  direction: minimize # minimize | maximize
+
+levers:
+  example_lever:
+    flag: "--example"
+    baseline: 1.0
+    space: [0.5, 1.0, 2.0]
+
+# calibration:
+#   wall_clock_minutes: 5
+#   max_total_seconds: 330
+
+rules:
+  - "Change command-line flags only"
+  - "Do not install packages"
