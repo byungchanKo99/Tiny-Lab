@@ -61,22 +61,56 @@ def _templates_dir() -> Path:
     return Path(__file__).parent / "templates"
 
 
+def _detect_provider() -> str:
+    """Auto-detect AI provider. If both available, ask user."""
+    has_claude = shutil.which("claude") is not None
+    has_codex = shutil.which("codex") is not None
+
+    if has_claude and has_codex:
+        print("Detected both Claude Code and Codex CLI.")
+        while True:
+            choice = input("Which provider? [claude/codex] (default: claude): ").strip().lower()
+            if choice in ("", "claude"):
+                return "claude"
+            if choice == "codex":
+                return "codex"
+            print("  Enter 'claude' or 'codex'.")
+    elif has_claude:
+        return "claude"
+    elif has_codex:
+        return "codex"
+    else:
+        print("Warning: Neither claude nor codex CLI found.")
+        print("Install one of:")
+        print("  Claude Code: https://claude.ai/claude-code")
+        print("  Codex CLI:   https://github.com/openai/codex")
+        print("Defaulting to claude. Change in research/project.yaml later.")
+        return "claude"
+
+
 def cmd_init(project_dir: Path) -> None:
     """Copy template files into the project directory."""
     templates = _templates_dir()
+    provider = _detect_provider()
 
+    # Core files (always installed)
     copies = [
         ("project.yaml", "research/project.yaml"),
         ("hypothesis_queue.yaml", "research/hypothesis_queue.yaml"),
         ("questions.yaml", "research/questions.yaml"),
-        ("claude_agents/hypothesis-generator.md", ".claude/agents/hypothesis-generator.md"),
-        ("claude_agents/code-modifier.md", ".claude/agents/code-modifier.md"),
-        ("claude_agents/ux-evaluator.md", ".claude/agents/ux-evaluator.md"),
-        ("claude_commands/research.md", ".claude/commands/research.md"),
-        ("claude_hooks/enforce-discovery.sh", ".claude/hooks/enforce-discovery.sh"),
-        ("claude_settings.json", ".claude/settings.json"),
         ("CLAUDE.md", "CLAUDE.md"),
     ]
+
+    # Claude Code specific files (only when provider is claude)
+    if provider == "claude":
+        copies += [
+            ("claude_agents/hypothesis-generator.md", ".claude/agents/hypothesis-generator.md"),
+            ("claude_agents/code-modifier.md", ".claude/agents/code-modifier.md"),
+            ("claude_agents/ux-evaluator.md", ".claude/agents/ux-evaluator.md"),
+            ("claude_commands/research.md", ".claude/commands/research.md"),
+            ("claude_hooks/enforce-discovery.sh", ".claude/hooks/enforce-discovery.sh"),
+            ("claude_settings.json", ".claude/settings.json"),
+        ]
 
     created = []
     skipped = []
@@ -109,7 +143,19 @@ def cmd_init(project_dir: Path) -> None:
         (project_dir / "research" / "ledger.jsonl").touch()
         print("  research/ledger.jsonl (empty)")
 
-    print("\nEdit research/project.yaml to configure your experiment, then run: tiny-lab run")
+    # Write detected provider into project.yaml
+    project_yaml = project_dir / "research" / "project.yaml"
+    if project_yaml.exists():
+        content = project_yaml.read_text()
+        content = content.replace("provider: claude", f"provider: {provider}")
+        project_yaml.write_text(content)
+
+    print(f"\nProvider: {provider}")
+    if provider == "claude":
+        print("Start with: /research <what you want to research>")
+        print("Or: tiny-lab discover <what you want to research>")
+    else:
+        print("Start with: tiny-lab discover <what you want to research>")
 
 
 def cmd_setup(project_dir: Path, *, global_install: bool = False) -> None:
