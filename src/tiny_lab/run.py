@@ -1,13 +1,14 @@
 """RUN plugins — execute experiments."""
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
+from .envutil import make_env
+from .errors import RunError
 from .logging import log
 
 
@@ -27,8 +28,7 @@ def run_experiment_surface(
     if eval_cmd:
         args += ["--eval-on-checkpoint", eval_cmd]
     max_seconds = project.get("calibration", {}).get("max_total_seconds")
-    env = os.environ.copy()
-    env["TINY_LAB_ROOT"] = str(project_dir)
+    env = make_env(project_dir)
     return subprocess.run(
         args, text=True, capture_output=True, env=env,
         timeout=max_seconds + 60 if max_seconds else None,
@@ -45,9 +45,7 @@ def run_experiment_command(
     workdir = project.get("workdir", ".")
     workdir_path = project_dir / workdir
     max_seconds = project.get("calibration", {}).get("max_total_seconds")
-    env = os.environ.copy()
-    env["TINY_LAB_ROOT"] = str(project_dir)
-    env["EXPERIMENT_ID"] = exp_id
+    env = make_env(project_dir, exp_id)
     return subprocess.run(
         command, shell=True, text=True, capture_output=True,
         cwd=str(workdir_path), env=env,
@@ -68,9 +66,7 @@ def run_experiment_pipeline(
 
     workdir = project.get("workdir", ".")
     workdir_path = project_dir / workdir
-    env = os.environ.copy()
-    env["TINY_LAB_ROOT"] = str(project_dir)
-    env["EXPERIMENT_ID"] = exp_id
+    env = make_env(project_dir, exp_id)
 
     combined_stdout = ""
     combined_stderr = ""
@@ -122,6 +118,10 @@ def run_experiment_pipeline(
     )
 
 
+RUN_MAX_RETRIES = 2
+RUN_RETRY_DELAYS = [5, 15]
+
+
 def dispatch_run(
     project: dict[str, Any],
     command: str,
@@ -130,12 +130,33 @@ def dispatch_run(
 ) -> subprocess.CompletedProcess[str]:
     """Route to the correct RUN plugin based on project.yaml run.type."""
     run_type = project.get("run", {}).get("type", "surface")
+    max_retries = project.get("run", {}).get("max_retries", RUN_MAX_RETRIES)
 
-    if run_type == "surface":
-        return run_experiment_surface(project, command, exp_id, project_dir)
-    elif run_type == "command":
-        return run_experiment_command(project, command, exp_id, project_dir)
-    elif run_type == "pipeline":
-        return run_experiment_pipeline(project, command, exp_id, project_dir)
-    else:
-        raise ValueError(f"Unknown run type: {run_type}")
+    last_error: Exception | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            if run_type == "surface":
+                return run_experiment_surface(project, command, exp_id, project_dir)
+            elif run_type == "command":
+                return run_experiment_command(project, command, exp_id, project_dir)
+            elif run_type == "pipeline":
+                return run_experiment_pipeline(project, command, exp_id, project_dir)
+            else:
+                raise RunError(f"Unknown run type: {run_type}")
+        except subprocess.TimeoutExpired as e:
+            last_error = RunError(f"Experiment {exp_id} timed out: {e}")
+            if attempt < max_retries:
+                delay = RUN_RETRY_DELAYS[min(attempt, len(RUN_RETRY_DELAYS) - 1)]
+                log(f"RUN: {exp_id} failed (attempt {attempt + 1}), retrying in {delay}s")
+                time.sleep(delay)
+            else:
+                raise last_error from e
+        except RunError as e:
+            last_error = e
+            if attempt < max_retries:
+                delay = RUN_RETRY_DELAYS[min(attempt, len(RUN_RETRY_DELAYS) - 1)]
+                log(f"RUN: {exp_id} failed (attempt {attempt + 1}), retrying in {delay}s")
+                time.sleep(delay)
+            else:
+                raise
+    raise last_error  # unreachable, but satisfies type checker

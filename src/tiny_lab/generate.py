@@ -1,4 +1,4 @@
-"""Hypothesis generation via Claude CLI subagent."""
+"""Hypothesis generation via AI provider subagent."""
 from __future__ import annotations
 
 import json
@@ -66,28 +66,20 @@ def _validate_new_entries(
     return valid_count
 
 
-def generate_hypotheses(project: dict[str, Any], project_dir: Path, run_claude_fn: Any) -> bool:
-    """Generate new hypotheses using Claude CLI subagent."""
-    levers_desc = []
-    for name, lever in project["levers"].items():
-        if "flag" in lever:
-            levers_desc.append(f"  {name}: flag={lever['flag']}, baseline={lever['baseline']}, space={lever['space']}")
-        else:
-            levers_desc.append(f"  {name}: type={lever.get('type', 'choice')}, space={lever['space']}")
-
-    prompt = f"""You are the autonomous research strategist for an experiment loop.
+_GENERATE_PROMPT_TEMPLATE = """\
+You are the autonomous research strategist for an experiment loop.
 You don't just generate hypotheses — you drive the entire research forward.
 Think like a senior researcher who comes in, reviews all results so far, and decides what to try next.
 
-PROJECT: {project['name']}
-DESCRIPTION: {project['description']}
-METRIC: {project['metric']['name']} (direction: {project['metric'].get('direction', 'minimize')})
+PROJECT: {project_name}
+DESCRIPTION: {project_description}
+METRIC: {metric_name} (direction: {metric_direction})
 
 CURRENT LEVERS:
-{chr(10).join(levers_desc)}
+{levers_text}
 
 RULES:
-{chr(10).join('- ' + r for r in project.get('rules', []))}
+{rules_text}
 
 STEP 1: READ AND ANALYZE (do this first, do not skip)
 
@@ -157,9 +149,13 @@ After any modifications to project.yaml, generate 3-5 hypotheses.
 Each hypothesis MUST have:
 - id: H-{{next number}} (check existing IDs in the queue)
 - status: pending
-- lever: {{lever name, "multi" for combinations, or new lever name if you added one}}
-- value: {{value to try}}
+- lever: {{lever name, or "multi" for combinations}}
+- value: {{single string/number for one lever, OR a dict like {{"lr": "0.05", "batch_size": "32"}} for multi-lever}}
 - description: "{{one line — include your REASONING, not just what you're changing}}"
+
+MULTI-LEVER COMBINATIONS:
+When you want to test multiple levers simultaneously, use lever: "multi" and value as a dict.
+Example: {{id: H-10, status: pending, lever: "lr+batch_size", value: {{"lr": "0.05", "batch_size": "32"}}, description: "..."}}
 
 Append to research/hypothesis_queue.yaml under the hypotheses key.
 Do NOT remove existing entries.
@@ -186,12 +182,40 @@ After generating hypotheses, write a JSON summary file to research/.generate_sum
 This file will be overwritten each generation cycle. The loop will archive it.
 Also log what you did and why to research/loop.log (append a summary line)."""
 
+
+def generate_hypotheses(project: dict[str, Any], project_dir: Path, provider: Any) -> bool:
+    """Generate new hypotheses using AI provider."""
+    levers_desc = []
+    for name, lever in project["levers"].items():
+        if "flag" in lever:
+            levers_desc.append(f"  {name}: flag={lever['flag']}, baseline={lever['baseline']}, space={lever['space']}")
+        else:
+            levers_desc.append(f"  {name}: type={lever.get('type', 'choice')}, space={lever['space']}")
+
+    prompt = _GENERATE_PROMPT_TEMPLATE.format(
+        project_name=project["name"],
+        project_description=project["description"],
+        metric_name=project["metric"]["name"],
+        metric_direction=project["metric"].get("direction", "minimize"),
+        levers_text="\n".join(levers_desc),
+        rules_text="\n".join("- " + r for r in project.get("rules", [])),
+    )
+
+    summary_path = project_dir / "research" / ".generate_summary.json"
+    schema_path = Path(__file__).parent / "templates" / "codex" / "schemas" / "generate_summary.json"
+
     before = load_queue(project_dir)
 
     try:
-        result = run_claude_fn(prompt, allowed_tools="Read,Write,Edit,Bash", cwd=str(project_dir))
+        result = provider.run_structured(
+            prompt,
+            output_path=summary_path,
+            schema_path=schema_path,
+            tools=["Read", "Write", "Edit", "Bash"],
+            cwd=str(project_dir),
+        )
         if result.returncode != 0:
-            log(f"GENERATE: AI subprocess exited with code {result.returncode}")
+            log(f"GENERATE: {provider.name} exited with code {result.returncode}")
     except RuntimeError as e:
         log(f"GENERATE: {e}")
         return False

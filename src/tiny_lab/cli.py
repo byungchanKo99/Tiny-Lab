@@ -2,13 +2,10 @@
 from __future__ import annotations
 
 import argparse
-import importlib.resources
 import json
 import os
 import shutil
 import signal
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +24,11 @@ def main() -> None:
     sub.add_parser("status", help="Show loop status")
     sub.add_parser("stop", help="Stop the running loop")
     sub.add_parser("generate", help="Generate new hypotheses")
-    sub.add_parser("board", help="Show experiment dashboard")
+    board_parser = sub.add_parser("board", help="Show experiment dashboard")
+    board_parser.add_argument("--export", choices=["csv", "json"], help="Export board data as CSV or JSON")
+    board_parser.add_argument("--plot", action="store_true", help="Show ASCII sparkline charts")
+    board_parser.add_argument("--html", metavar="FILE", nargs="?", const="research/report.html", help="Generate self-contained HTML report")
+    board_parser.add_argument("-o", "--output", help="Output file path (for --export)")
     discover_parser = sub.add_parser("discover", help="Interactive research setup (works with any AI provider)")
     discover_parser.add_argument("intent", nargs="*", help="What you want to research (natural language)")
 
@@ -38,18 +39,19 @@ def main() -> None:
         parser.print_help()
         return
 
-    commands = {
-        "run": cmd_run,
-        "status": cmd_status,
-        "stop": cmd_stop,
-        "generate": cmd_generate,
-        "board": cmd_board,
-    }
     if args.command == "init":
         cmd_init(project_dir, global_install=args.global_install)
     elif args.command == "discover":
         cmd_discover(project_dir, " ".join(args.intent) if args.intent else "")
+    elif args.command == "board":
+        cmd_board(project_dir, args)
     else:
+        commands = {
+            "run": cmd_run,
+            "status": cmd_status,
+            "stop": cmd_stop,
+            "generate": cmd_generate,
+        }
         commands[args.command](project_dir)
 
 
@@ -58,62 +60,18 @@ def _templates_dir() -> Path:
     return Path(__file__).parent / "templates"
 
 
-def _detect_provider() -> str:
-    """Auto-detect AI provider. If both available, ask user."""
-    has_claude = shutil.which("claude") is not None
-    has_codex = shutil.which("codex") is not None
-
-    if has_claude and has_codex:
-        print("Detected both Claude Code and Codex CLI.")
-        while True:
-            choice = input("Which provider? [claude/codex] (default: claude): ").strip().lower()
-            if choice in ("", "claude"):
-                return "claude"
-            if choice == "codex":
-                return "codex"
-            print("  Enter 'claude' or 'codex'.")
-    elif has_claude:
-        return "claude"
-    elif has_codex:
-        return "codex"
-    else:
-        print("Warning: Neither claude nor codex CLI found.")
-        print("Install one of:")
-        print("  Claude Code: https://claude.ai/claude-code")
-        print("  Codex CLI:   https://github.com/openai/codex")
-        print("Defaulting to claude. Change in research/project.yaml later.")
-        return "claude"
-
-
 def cmd_init(project_dir: Path, *, global_install: bool = False) -> None:
     """Initialize a new experiment project."""
+    from .providers import detect_provider, get_provider
+
     templates = _templates_dir()
-    provider = _detect_provider()
-
-    # Core files (always installed)
-    copies = [
-        ("project.yaml", "research/project.yaml"),
-        ("hypothesis_queue.yaml", "research/hypothesis_queue.yaml"),
-        ("questions.yaml", "research/questions.yaml"),
-        ("CLAUDE.md", "CLAUDE.md"),
-        ("AGENTS.md", "AGENTS.md"),
-    ]
-
-    # Claude Code specific files (only when provider is claude)
-    if provider == "claude":
-        copies += [
-            ("claude_agents/hypothesis-generator.md", ".claude/agents/hypothesis-generator.md"),
-            ("claude_agents/code-modifier.md", ".claude/agents/code-modifier.md"),
-            ("claude_agents/ux-evaluator.md", ".claude/agents/ux-evaluator.md"),
-            ("claude_commands/research.md", ".claude/commands/research.md"),
-            ("claude_hooks/enforce-discovery.sh", ".claude/hooks/enforce-discovery.sh"),
-            ("claude_settings.json", ".claude/settings.json"),
-        ]
+    provider_name = detect_provider()
+    provider = get_provider(project_dir, provider_name)
 
     created = []
     skipped = []
 
-    for src_rel, dst_rel in copies:
+    for src_rel, dst_rel in provider.get_template_files():
         src = templates / src_rel
         dst = project_dir / dst_rel
 
@@ -123,7 +81,6 @@ def cmd_init(project_dir: Path, *, global_install: bool = False) -> None:
 
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
-        # Make hook scripts executable
         if dst_rel.endswith(".sh"):
             dst.chmod(dst.stat().st_mode | 0o111)
         created.append(dst_rel)
@@ -145,20 +102,20 @@ def cmd_init(project_dir: Path, *, global_install: bool = False) -> None:
     project_yaml = project_dir / "research" / "project.yaml"
     if project_yaml.exists():
         content = project_yaml.read_text()
-        content = content.replace("provider: claude", f"provider: {provider}")
+        content = content.replace("provider: claude", f"provider: {provider_name}")
         project_yaml.write_text(content)
 
     # --global: also install /research command to ~/.claude/ for all projects
-    if global_install and provider == "claude":
+    if global_install and provider_name == "claude":
         global_dst = Path.home() / ".claude" / "commands" / "research.md"
-        global_src = templates / "claude_commands" / "research.md"
+        global_src = templates / "claude" / "commands" / "research.md"
         global_dst.parent.mkdir(parents=True, exist_ok=True)
         if not global_dst.exists() or global_dst.read_text() != global_src.read_text():
             shutil.copy2(global_src, global_dst)
             print(f"  {global_dst} (global /research command)")
 
-    print(f"\nProvider: {provider}")
-    if provider == "claude":
+    print(f"\nProvider: {provider_name}")
+    if provider_name == "claude":
         print("Start with: /research <what you want to research>")
         print("Or: tiny-lab discover <what you want to research>")
     else:
@@ -254,13 +211,13 @@ def cmd_generate(project_dir: Path) -> None:
     """Manually trigger hypothesis generation."""
     from .project import load_project
     from .generate import generate_hypotheses, load_queue, pending_hypotheses
-    from .loop import ResearchLoop
+    from .providers import get_provider
 
     project = load_project(project_dir)
-    loop = ResearchLoop(project_dir)
+    provider = get_provider(project_dir)
 
     before = len(pending_hypotheses(load_queue(project_dir)))
-    generate_hypotheses(project, project_dir, loop._run_ai)
+    generate_hypotheses(project, project_dir, provider)
     after = len(pending_hypotheses(load_queue(project_dir)))
 
     added = after - before
@@ -276,21 +233,15 @@ def cmd_discover(project_dir: Path, intent: str = "") -> None:
     Portable alternative to /research slash command — works with any provider.
     Reads research.md discovery instructions and runs the AI interactively.
     """
-    from .loop import ResearchLoop, CLAUDE_BIN, CODEX_BIN
+    from .providers import get_provider
 
     templates = _templates_dir()
-    research_md = templates / "claude_commands" / "research.md"
+    research_md = templates / "claude" / "commands" / "research.md"
 
     # Read the discovery mode instructions
     instructions = research_md.read_text()
 
-    # Determine provider
-    project_yaml = project_dir / "research" / "project.yaml"
-    if project_yaml.exists():
-        data = yaml.safe_load(project_yaml.read_text()) or {}
-        provider = data.get("agent", {}).get("provider", "claude")
-    else:
-        provider = os.environ.get("TINYLAB_PROVIDER", "claude")
+    provider = get_provider(project_dir)
 
     prompt = f"""You are running the /research discovery mode.
 
@@ -303,34 +254,18 @@ The working directory is: {project_dir}
 
 Start with Phase 1: SCAN. Scan the current directory and proceed through the phases."""
 
-    print(f"Starting discovery mode (provider: {provider})...")
+    print(f"Starting discovery mode (provider: {provider.name})...")
     print(f"Project directory: {project_dir}")
     if intent:
         print(f"Intent: {intent}")
     print()
 
-    if provider == "codex":
-        if not shutil.which(CODEX_BIN):
-            print(f"Error: codex CLI not found. Install it or set agent.provider: claude")
-            return
-        cmd = [CODEX_BIN, "exec", prompt, "--full-auto", "--skip-git-repo-check"]
-    else:
-        if not shutil.which(CLAUDE_BIN):
-            print(f"Error: claude CLI not found. Install it or set agent.provider: codex")
-            return
-        env_key = "CLAUDECODE"
-        cmd = [CLAUDE_BIN, "-p", prompt,
-               "--allowedTools", "Read,Write,Edit,Bash,Glob,Grep",
-               "--max-turns", "50", "--output-format", "text"]
-
-    # Run interactively (not captured — user sees output directly)
-    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
-    result = subprocess.run(cmd, cwd=str(project_dir), env=env)
+    result = provider.run_interactive(prompt, cwd=str(project_dir))
     raise SystemExit(result.returncode)
 
 
-def cmd_board(project_dir: Path) -> None:
-    """Show experiment dashboard."""
+def _build_board_data(project_dir: Path) -> dict[str, Any] | None:
+    """Load and compute all data needed for the experiment dashboard."""
     from .project import load_project
     from .ledger import load_ledger, get_baseline_metric
     from .generate import load_queue, load_generate_history
@@ -338,19 +273,13 @@ def cmd_board(project_dir: Path) -> None:
     try:
         project = load_project(project_dir)
     except FileNotFoundError:
-        print("No project.yaml found. Run 'tiny-lab init' first.")
-        return
+        return None
 
     metric_name = project["metric"]["name"]
     direction = project["metric"].get("direction", "minimize")
     ledger = load_ledger(project_dir)
     baseline = get_baseline_metric(project_dir, metric_name)
     queue = load_queue(project_dir)
-
-    print(f"Project: {project['name']}")
-    print(f"Metric: {metric_name} (direction: {direction})")
-    print(f"Baseline {metric_name}: {baseline}")
-    print()
 
     # Best result
     best_row = None
@@ -368,28 +297,66 @@ def cmd_board(project_dir: Path) -> None:
                 best_row = row
             elif direction == "minimize" and val < best_val:
                 best_row = row
-    if best_row:
-        bpm = best_row.get("primary_metric", {})
-        print(f"Best: {best_row['id']} — {metric_name}={bpm.get(metric_name)} (delta={bpm.get('delta_pct')}%) "
-              f"[{best_row.get('changed_variable')}={best_row.get('value')}]")
-    print()
 
-    # Win/Loss/Invalid counts
+    # Class counts
     counts: dict[str, int] = {}
     for row in ledger:
         c = row.get("class", "UNKNOWN")
         counts[c] = counts.get(c, 0) + 1
-    print("Results: " + ", ".join(f"{k}: {v}" for k, v in sorted(counts.items())))
 
-    # Queue
+    # Queue counts
     queue_counts: dict[str, int] = {}
     for h in queue:
         s = h.get("status", "unknown")
         queue_counts[s] = queue_counts.get(s, 0) + 1
+
+    return {
+        "project": project,
+        "metric_name": metric_name,
+        "direction": direction,
+        "ledger": ledger,
+        "baseline": baseline,
+        "best_row": best_row,
+        "counts": counts,
+        "queue_counts": queue_counts,
+        "gen_history": load_generate_history(project_dir),
+    }
+
+
+def _format_value(value: Any) -> str:
+    """Format a hypothesis value for display. Handles both str and dict (multi-lever)."""
+    if isinstance(value, dict):
+        return ", ".join(f"{k}={v}" for k, v in value.items())
+    return str(value)
+
+
+def _format_board(data: dict[str, Any]) -> None:
+    """Print the experiment dashboard from pre-computed data."""
+    metric_name = data["metric_name"]
+    direction = data["direction"]
+    baseline = data["baseline"]
+    ledger = data["ledger"]
+    best_row = data["best_row"]
+    counts = data["counts"]
+    queue_counts = data["queue_counts"]
+    gen_history = data["gen_history"]
+
+    print(f"Project: {data['project']['name']}")
+    print(f"Metric: {metric_name} (direction: {direction})")
+    print(f"Baseline {metric_name}: {baseline}")
+    print()
+
+    if best_row:
+        bpm = best_row.get("primary_metric", {})
+        value_display = _format_value(best_row.get("value"))
+        print(f"Best: {best_row['id']} — {metric_name}={bpm.get(metric_name)} (delta={bpm.get('delta_pct')}%) "
+              f"[{best_row.get('changed_variable')}={value_display}]")
+    print()
+
+    print("Results: " + ", ".join(f"{k}: {v}" for k, v in sorted(counts.items())))
     print("Queue: " + ", ".join(f"{k}: {v}" for k, v in sorted(queue_counts.items())))
     print()
 
-    # Last 10 experiments
     recent = ledger[-10:]
     if recent:
         print(f"{'ID':<10} {'Verdict':<12} {metric_name:<15} {'Delta%':<10} {'Description'}")
@@ -403,8 +370,6 @@ def cmd_board(project_dir: Path) -> None:
     else:
         print("No experiments yet.")
 
-    # Generation history
-    gen_history = load_generate_history(project_dir)
     if gen_history:
         print()
         print("Generation History:")
@@ -423,3 +388,125 @@ def cmd_board(project_dir: Path) -> None:
             changes = entry.get("changes_made", [])
             if changes:
                 print(f"    Changes: {'; '.join(changes)}")
+
+
+def _export_board(data: dict[str, Any], fmt: str, output_path: str | None) -> None:
+    """Export board data as CSV or JSON."""
+    import csv
+    import io
+
+    metric_name = data["metric_name"]
+    ledger = data["ledger"]
+
+    if fmt == "json":
+        rows = []
+        for row in ledger:
+            pm = row.get("primary_metric", {})
+            rows.append({
+                "id": row.get("id"),
+                "class": row.get("class"),
+                "changed_variable": row.get("changed_variable"),
+                "value": row.get("value"),
+                metric_name: pm.get(metric_name),
+                "baseline": pm.get("baseline"),
+                "delta_pct": pm.get("delta_pct"),
+                "question": row.get("question"),
+            })
+        text = json.dumps(rows, indent=2, ensure_ascii=False)
+    else:
+        buf = io.StringIO()
+        fields = ["id", "class", "changed_variable", "value", metric_name, "baseline", "delta_pct", "question"]
+        writer = csv.DictWriter(buf, fieldnames=fields)
+        writer.writeheader()
+        for row in ledger:
+            pm = row.get("primary_metric", {})
+            writer.writerow({
+                "id": row.get("id"),
+                "class": row.get("class"),
+                "changed_variable": row.get("changed_variable"),
+                "value": row.get("value"),
+                metric_name: pm.get(metric_name),
+                "baseline": pm.get("baseline"),
+                "delta_pct": pm.get("delta_pct"),
+                "question": row.get("question"),
+            })
+        text = buf.getvalue()
+
+    if output_path:
+        Path(output_path).write_text(text)
+        print(f"Exported to {output_path}")
+    else:
+        print(text)
+
+
+def _format_sparklines(data: dict[str, Any]) -> None:
+    """Print ASCII sparkline charts for metric trends and lever win/loss ratios."""
+    metric_name = data["metric_name"]
+    ledger = data["ledger"]
+    blocks = " ▁▂▃▄▅▆▇█"
+
+    # Metric trend sparkline
+    values = []
+    for row in ledger:
+        if row.get("class") == "BASELINE":
+            continue
+        val = row.get("primary_metric", {}).get(metric_name)
+        if val is not None:
+            values.append(val)
+
+    if values:
+        lo, hi = min(values), max(values)
+        span = hi - lo if hi != lo else 1
+        spark = "".join(blocks[min(8, int((v - lo) / span * 8))] for v in values)
+        print(f"Metric trend ({metric_name}): {spark}  [{lo:.4g} .. {hi:.4g}]")
+    else:
+        print(f"Metric trend ({metric_name}): (no data)")
+
+    # Per-lever win/loss ratio
+    lever_stats: dict[str, dict[str, int]] = {}
+    for row in ledger:
+        if row.get("class") in ("BASELINE", None):
+            continue
+        lever = row.get("changed_variable", "?")
+        if lever not in lever_stats:
+            lever_stats[lever] = {"WIN": 0, "LOSS": 0, "INVALID": 0, "INCONCLUSIVE": 0}
+        cls = row.get("class", "INVALID")
+        if cls in lever_stats[lever]:
+            lever_stats[lever][cls] += 1
+
+    if lever_stats:
+        print()
+        print("Lever stats:")
+        for lever, stats in sorted(lever_stats.items()):
+            total = stats["WIN"] + stats["LOSS"]
+            ratio = f"{stats['WIN']}/{total}" if total else "0/0"
+            bar_len = min(stats["WIN"], 20)
+            bar = "█" * bar_len + "░" * (min(total, 20) - bar_len) if total else ""
+            print(f"  {lever:<20} W/L: {ratio:<8} {bar}  (+{stats['INVALID']} invalid)")
+
+
+def cmd_board(project_dir: Path, args: argparse.Namespace | None = None) -> None:
+    """Show experiment dashboard."""
+    data = _build_board_data(project_dir)
+    if data is None:
+        print("No project.yaml found. Run 'tiny-lab init' first.")
+        return
+
+    export_fmt = getattr(args, "export", None) if args else None
+    do_plot = getattr(args, "plot", False) if args else False
+    html_path = getattr(args, "html", None) if args else None
+    output_path = getattr(args, "output", None) if args else None
+
+    if export_fmt:
+        _export_board(data, export_fmt, output_path)
+    elif do_plot:
+        _format_board(data)
+        print()
+        _format_sparklines(data)
+    elif html_path:
+        from .report import generate_html_report
+        out = project_dir / html_path
+        generate_html_report(data, out)
+        print(f"Report written to {out}")
+    else:
+        _format_board(data)

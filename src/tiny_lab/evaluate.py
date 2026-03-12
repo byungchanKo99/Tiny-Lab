@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 from typing import Any
 
+from .envutil import make_env
+from .errors import EvaluateError
 from .logging import log
+from .providers.base import AIProvider
 from .schemas import validate_eval_result, ValidationError
 
 
@@ -42,6 +44,10 @@ def evaluate_stdout_json(
     return None
 
 
+EVAL_MAX_RETRIES = 2
+EVAL_RETRY_DELAYS = [5, 15]
+
+
 def evaluate_with_script(
     project: dict[str, Any],
     run_result: subprocess.CompletedProcess[str] | None,
@@ -49,6 +55,8 @@ def evaluate_with_script(
     project_dir: Path,
 ) -> float | None:
     """Run a separate evaluation script that outputs JSON with the metric."""
+    import time
+
     eval_config = project.get("evaluate", {})
     eval_command = eval_config.get("command") or project["baseline"].get("eval_command")
     if not eval_command:
@@ -57,25 +65,37 @@ def evaluate_with_script(
 
     workdir = project.get("workdir", ".")
     workdir_path = project_dir / workdir
-    env = os.environ.copy()
-    env["TINY_LAB_ROOT"] = str(project_dir)
-    env["EXPERIMENT_ID"] = exp_id
+    env = make_env(project_dir, exp_id)
+    max_retries = eval_config.get("max_retries", EVAL_MAX_RETRIES)
 
-    try:
-        result = subprocess.run(
-            eval_command, shell=True, text=True, capture_output=True,
-            cwd=str(workdir_path), env=env, timeout=300,
-        )
-    except subprocess.TimeoutExpired:
-        log("EVALUATE[script]: eval script timed out")
-        return None
+    for attempt in range(max_retries + 1):
+        try:
+            result = subprocess.run(
+                eval_command, shell=True, text=True, capture_output=True,
+                cwd=str(workdir_path), env=env, timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            if attempt < max_retries:
+                delay = EVAL_RETRY_DELAYS[min(attempt, len(EVAL_RETRY_DELAYS) - 1)]
+                log(f"EVALUATE[script]: timed out (attempt {attempt + 1}), retrying in {delay}s")
+                time.sleep(delay)
+                continue
+            log("EVALUATE[script]: eval script timed out after all retries")
+            return None
 
-    if result.returncode != 0:
-        log(f"EVALUATE[script]: eval script failed (exit={result.returncode})")
-        return None
+        if result.returncode != 0:
+            if attempt < max_retries:
+                delay = EVAL_RETRY_DELAYS[min(attempt, len(EVAL_RETRY_DELAYS) - 1)]
+                log(f"EVALUATE[script]: failed (exit={result.returncode}, attempt {attempt + 1}), retrying in {delay}s")
+                time.sleep(delay)
+                continue
+            log(f"EVALUATE[script]: eval script failed (exit={result.returncode}) after all retries")
+            return None
 
-    metric_name = project["metric"]["name"]
-    return extract_metric_from_stdout(result.stdout, metric_name)
+        metric_name = project["metric"]["name"]
+        return extract_metric_from_stdout(result.stdout, metric_name)
+
+    return None
 
 
 def evaluate_with_llm(
@@ -84,11 +104,11 @@ def evaluate_with_llm(
     hypothesis: dict[str, Any],
     exp_id: str,
     project_dir: Path,
-    run_claude_fn: Any = None,
+    provider: AIProvider | None = None,
 ) -> float | None:
-    """LLM subagent evaluates artifacts. Non-deterministic."""
-    if run_claude_fn is None:
-        raise RuntimeError("evaluate.type=llm requires Claude CLI")
+    """AI provider evaluates artifacts. Non-deterministic."""
+    if provider is None:
+        raise EvaluateError("evaluate.type=llm requires an AI provider")
 
     eval_config = project.get("evaluate", {})
     artifacts = eval_config.get("artifacts", [])
@@ -129,9 +149,9 @@ Be objective. Score based on the criteria, not on effort."""
         if attempt > 1:
             current_prompt += f"\n\nPREVIOUS ATTEMPT FAILED VALIDATION: {last_errors}\nPlease fix the output format and try again."
 
-        log(f"EVALUATE[llm]: calling subagent for {exp_id} (attempt {attempt}/{max_attempts})")
+        log(f"EVALUATE[llm]: calling {provider.name} for {exp_id} (attempt {attempt}/{max_attempts})")
         try:
-            run_claude_fn(current_prompt, allowed_tools="Read,Bash", max_turns=10, cwd=str(project_dir))
+            provider.run(current_prompt, tools=["Read", "Bash"], max_turns=10, cwd=str(project_dir))
         except RuntimeError:
             log(f"EVALUATE[llm]: subagent call failed for {exp_id}")
             return None
@@ -184,7 +204,7 @@ def dispatch_evaluate(
     hypothesis: dict[str, Any],
     exp_id: str,
     project_dir: Path,
-    run_claude_fn: Any = None,
+    provider: AIProvider | None = None,
 ) -> float | None:
     """Route to the correct EVALUATE plugin based on project.yaml evaluate.type."""
     eval_type = project.get("evaluate", {}).get("type", "stdout_json")
@@ -194,6 +214,6 @@ def dispatch_evaluate(
     elif eval_type == "script":
         return evaluate_with_script(project, run_result, exp_id, project_dir)
     elif eval_type == "llm":
-        return evaluate_with_llm(project, run_result, hypothesis, exp_id, project_dir, run_claude_fn)
+        return evaluate_with_llm(project, run_result, hypothesis, exp_id, project_dir, provider)
     else:
         raise ValueError(f"Unknown evaluate type: {eval_type}")

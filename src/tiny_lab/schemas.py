@@ -22,7 +22,7 @@ class ValidationError(ValueError):
 # ---------------------------------------------------------------------------
 
 HYPOTHESIS_ENTRY = {
-    "required": {"id": str, "status": str, "lever": str, "value": (str, int, float), "description": str},
+    "required": {"id": str, "status": str, "lever": str, "value": (str, int, float, dict), "description": str},
     "enums": {"status": {"pending", "running", "done", "skipped"}},
 }
 
@@ -46,7 +46,7 @@ LEDGER_ENTRY = {
         "primary_metric": dict,
         "decision": str,
     },
-    "optional": {"value": (str, int, float, type(None)), "control": str, "notes": str},
+    "optional": {"value": (str, int, float, dict, type(None)), "control": str, "notes": str},
     "enums": {"class": {"WIN", "LOSS", "INVALID", "INCONCLUSIVE", "BASELINE"}},
 }
 
