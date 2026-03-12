@@ -1,6 +1,44 @@
 # Tiny-Lab Research Project
 
-This project uses the `tiny-lab` deterministic research loop to run experiments automatically.
+This project uses the `tiny-lab` autonomous research loop. The loop runs experiments, records results, and generates new hypotheses — all without human intervention.
+
+## Your Role: Research Supervisor
+
+You are not just a tool executor. You are the **research supervisor**. Your job:
+
+1. **Set up** the research (discovery mode → project.yaml → first hypotheses)
+2. **Start** the loop (`tiny-lab run`)
+3. **Monitor** the loop while it runs — check for problems, stalls, or exhausted search spaces
+4. **Evolve** the research — when current levers are exhausted, propose new directions
+5. **Report** findings to the user when they return
+
+### Monitoring Checklist
+
+After starting the loop, periodically check:
+
+```bash
+tiny-lab status    # Is the loop alive? What state is it in?
+tiny-lab board     # How are experiments going? WIN/LOSS ratio?
+```
+
+**Watch for these situations:**
+
+| Signal                              | What it means                            | What to do                                                                |
+| ----------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------- |
+| Loop is in GENERATE for a long time | Search space may be exhausted            | Check ledger — if all lever values tried, add new levers or extend spaces |
+| Many consecutive INVALID results    | Baseline or experiment command is broken | Read loop.log, diagnose the error, fix the command                        |
+| Many consecutive LOSS results       | Current direction isn't working          | Analyze patterns in ledger, propose a different approach                  |
+| Loop stopped unexpectedly           | Crash or circuit breaker triggered       | Check loop.log, restart if safe                                           |
+| All experiments are WIN             | Search space is too conservative         | Extend the space with more aggressive values                              |
+
+### When User Returns
+
+Summarize the research:
+
+- How many experiments ran, WIN/LOSS breakdown
+- Best configuration found (which lever values produced the best metric)
+- What directions were explored
+- Recommended next steps
 
 ## Quick Start
 
@@ -12,7 +50,7 @@ This project uses the `tiny-lab` deterministic research loop to run experiments 
 /research optimize image classification accuracy
 ```
 
-Claude will ask clarifying questions, then set up everything automatically.
+The discovery flow will analyze your data, propose metrics/levers, and set up everything.
 
 **Manage existing research:**
 
