@@ -61,6 +61,31 @@ The user said something that isn't a known subcommand. Treat `$ARGUMENTS` as a n
 
 Be conversational, not robotic. But follow the state machine below exactly.
 
+### State File (CRITICAL)
+
+A `PreToolUse` hook enforces phase ordering. You MUST update `research/.discovery_state.yaml` at the **end of each phase** before moving to the next. If you don't, the hook will block Write/Edit to research config files and block `tiny-lab run`.
+
+**Update the state file using the Write tool at the end of every phase:**
+
+```yaml
+# research/.discovery_state.yaml
+phase: SCAN # Current completed phase: SCAN | ANALYZE | ASK_DATA | CONCRETIZE | SETUP | CONFIRM | DONE
+scan:
+  data_files: []
+  script_files: []
+  has_project_yaml: false
+  is_initialized: false
+  user_intent: ""
+analyze: # null if skipped
+  metric_candidates: []
+  lever_candidates: []
+concretize: # null until Phase 3
+  fields_filled: []
+  fields_missing: []
+```
+
+The hook checks this file before allowing writes to `research/project.yaml`, `research/questions.yaml`, `research/hypothesis_queue.yaml`, and before allowing `tiny-lab run`. Phase must be `SETUP` to write config files, `CONFIRM` to run the loop.
+
 ```
 SCAN ──→ data found? ──→ YES ──→ ANALYZE ──→ CONCRETIZE
   │                       NO ──→ ASK_DATA ──→ user provides path ──→ ANALYZE
@@ -102,6 +127,10 @@ scan_result:
   script_files: [list of paths]
   user_intent: "extracted from user's natural language input"
 ```
+
+**Before branching — write state file:**
+
+Write `research/.discovery_state.yaml` with `phase: SCAN` and the scan results.
 
 **Branching:**
 
@@ -149,6 +178,8 @@ I analyzed your environment:
 Which metric do you want to optimize? Are these the right levers?
 ```
 
+**Before presenting to user — update state file:** Set `phase: ANALYZE` with metric/lever candidates.
+
 **After user responds** → go to **Phase 3: CONCRETIZE**
 
 ---
@@ -166,6 +197,8 @@ Which metric do you want to optimize? Are these the right levers?
 2. 데이터를 아직 준비 안 했다 → 이 디렉토리에 넣어주면 분석해드릴게요
 3. 데이터 없이 진행하고 싶다 → 스크립트/명령어 기반으로 세팅할게요
 ```
+
+**Update state file:** Set `phase: ASK_DATA`.
 
 **Branching (based on user response):**
 
@@ -207,13 +240,15 @@ Which metric do you want to optimize? Are these the right levers?
 - ANALYZE found categorical column with ≤10 values → `space: [all unique values]`
 - ANALYZE found numeric parameter → propose 4-5 values around the baseline (e.g., baseline=0.5 → space: [0.3, 0.5, 0.7, 1.0])
 
-**Exit condition:** All 7 fields filled → go to **Phase 4: SETUP**
+**Exit condition:** All 7 fields filled → **update state file** with `phase: CONCRETIZE` and filled fields → go to **Phase 4: SETUP**
 
 ---
 
 ### Phase 4: SETUP
 
-**Entry condition:** All 7 fields confirmed
+**Entry condition:** All 7 fields confirmed, state file shows `phase: CONCRETIZE`
+
+**First action:** Update state file to `phase: SETUP`. This unlocks Write/Edit to research config files.
 
 **Actions (execute in this exact order):**
 
@@ -290,6 +325,8 @@ Which metric do you want to optimize? Are these the right levers?
 
 **Entry condition:** Phase 4 complete, baseline verified
 
+**First action:** Update state file to `phase: CONFIRM`. This unlocks `tiny-lab run`.
+
 **Required output (show ALL of this):**
 
 ```
@@ -306,5 +343,5 @@ Start the research loop? (tiny-lab run)
 
 **Branching:**
 
-- User approves → run `tiny-lab run`, report PID
-- User wants changes → identify which phase to revisit, go back to that phase
+- User approves → update state file to `phase: DONE` → run `tiny-lab run`, report PID
+- User wants changes → update state file back to the relevant phase → revisit that phase

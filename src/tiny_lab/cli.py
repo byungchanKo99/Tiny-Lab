@@ -68,6 +68,8 @@ def cmd_init(project_dir: Path) -> None:
         ("claude_agents/code-modifier.md", ".claude/agents/code-modifier.md"),
         ("claude_agents/ux-evaluator.md", ".claude/agents/ux-evaluator.md"),
         ("claude_commands/research.md", ".claude/commands/research.md"),
+        ("claude_hooks/enforce-discovery.sh", ".claude/hooks/enforce-discovery.sh"),
+        ("claude_settings.json", ".claude/settings.json"),
         ("CLAUDE.md", "CLAUDE.md"),
     ]
 
@@ -84,6 +86,9 @@ def cmd_init(project_dir: Path) -> None:
 
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
+        # Make hook scripts executable
+        if dst_rel.endswith(".sh"):
+            dst.chmod(dst.stat().st_mode | 0o111)
         created.append(dst_rel)
 
     if created:
