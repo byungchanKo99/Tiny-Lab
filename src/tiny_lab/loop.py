@@ -120,7 +120,7 @@ class ResearchLoop:
         if not shutil.which(CODEX_BIN):
             raise RuntimeError(f"codex CLI not found ({CODEX_BIN}). Set agent.provider: claude in project.yaml if using Claude Code.")
         return subprocess.run(
-            [CODEX_BIN, "exec", prompt, "-s", "workspace-write", "-a", "on-request"],
+            [CODEX_BIN, "exec", prompt, "--full-auto"],
             text=True, capture_output=True, cwd=cwd or str(self.project_dir),
         )
 

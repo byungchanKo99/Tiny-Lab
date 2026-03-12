@@ -313,7 +313,7 @@ Start with Phase 1: SCAN. Scan the current directory and proceed through the pha
         if not shutil.which(CODEX_BIN):
             print(f"Error: codex CLI not found. Install it or set agent.provider: claude")
             return
-        cmd = [CODEX_BIN, "exec", prompt, "-s", "workspace-write", "-a", "on-request"]
+        cmd = [CODEX_BIN, "exec", prompt, "--full-auto"]
     else:
         if not shutil.which(CLAUDE_BIN):
             print(f"Error: claude CLI not found. Install it or set agent.provider: codex")
