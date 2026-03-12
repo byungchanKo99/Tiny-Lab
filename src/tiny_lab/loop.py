@@ -81,10 +81,14 @@ class ResearchLoop:
     ) -> subprocess.CompletedProcess[str]:
         if not shutil.which(CLAUDE_BIN):
             raise RuntimeError(f"claude CLI not found ({CLAUDE_BIN})")
+        # Strip CLAUDECODE env var to allow subprocess claude invocations
+        # from within a Claude Code session (not truly nesting — independent CLI calls)
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
         return subprocess.run(
             [CLAUDE_BIN, "-p", prompt, "--allowedTools", allowed_tools,
              "--max-turns", str(max_turns or CLAUDE_MAX_TURNS), "--output-format", "text"],
             text=True, capture_output=True, cwd=cwd or str(self.project_dir),
+            env=env,
         )
 
     def _check_circuit_breaker(self) -> bool:
