@@ -55,118 +55,204 @@ tiny-lab board
 
 ## Discovery Mode
 
-The user said something that isn't a known subcommand. This means they want to **start or set up a new research**. Their input is a natural language description of what they want to research/optimize/experiment with.
+The user said something that isn't a known subcommand. Treat `$ARGUMENTS` as a natural language research intent.
 
-Follow these phases **in order**. Be conversational, not robotic. Skip questions when the answer is obvious from context.
+**Execute phases strictly in order. Do not skip phases. Do not combine phases.**
 
-### Phase 1: Understand Intent
+Be conversational, not robotic. But follow the state machine below exactly.
 
-Read the user's input and extract:
+```
+SCAN ──→ data found? ──→ YES ──→ ANALYZE ──→ CONCRETIZE
+  │                       NO ──→ ASK_DATA ──→ user provides path ──→ ANALYZE
+  │                                           user will add later ──→ (wait, re-SCAN)
+  │                                           proceed without data ──→ CONCRETIZE
+  │
+  ├─ project.yaml exists? ──→ ASK: modify or fresh?
+  │
+  └─ script found? ──→ read in ANALYZE phase
 
-- What they want to optimize or study
-- Any mentioned scripts, files, or data
-- Any mentioned metrics or success criteria
+CONCRETIZE ──→ all 7 fields filled? ──→ YES ──→ SETUP
+                                         NO ──→ ask missing → loop
 
-Check if `research/project.yaml` already exists:
+SETUP ──→ baseline works? ──→ YES ──→ CONFIRM
+                              NO ──→ fix (max 2 retries) → ask user
 
-- If yes: ask if they want to modify the existing project or start fresh
-- If no: proceed to Phase 2
+CONFIRM ──→ user approves ──→ tiny-lab run
+             user wants changes ──→ back to relevant phase
+```
 
-Also scan the current directory for clues:
+---
 
-- Look for Python scripts, config files, data directories
-- Check if `tiny-lab` is already initialized (`.claude/agents/`, `research/` dirs)
+### Phase 1: SCAN
 
-### Phase 2: Concretize (Ask Questions)
+**Actions (do all of these):**
 
-You need to fill in these fields for `research/project.yaml`. Ask about anything you can't confidently infer. **Group related questions together** — don't ask one at a time.
+1. Check if `research/project.yaml` exists
+2. Search for script files: `*.py`, `*.sh`, `*.R` (exclude `__pycache__`, `.venv`, `node_modules`)
+3. Search for data files: `*.csv`, `*.json`, `*.jsonl`, `*.parquet`, `*.tsv`, `*.xlsx`
+4. Check if already initialized: `research/` dir, `.claude/agents/` dir
 
-**Must determine:**
+**After scanning, determine your internal state:**
 
-1. **Experiment name** — a short identifier (e.g., `hotel-pricing-revpar`)
-2. **Description** — one sentence about the goal
-3. **Metric** — what number to optimize (name, minimize or maximize)
-4. **Baseline command** — the command that runs the experiment with default settings. Must produce the metric as JSON in stdout like `{"metric_name": 1.23}`
-5. **Levers** — which variables to experiment with. For each lever:
-   - Name (e.g., `learning_rate`)
-   - How it's controlled: CLI flag (e.g., `--lr`) or code modification
-   - Current default value (baseline)
-   - Values to try (search space)
-6. **Run method** — `command` (direct shell), `surface` (via surface tool), or `pipeline` (multi-step)
-7. **Evaluation method** — `stdout_json` (parse stdout), `script` (separate eval script), or `llm` (AI scoring)
+```
+scan_result:
+  has_project_yaml: true/false
+  is_initialized: true/false
+  data_files: [list of paths]
+  script_files: [list of paths]
+  user_intent: "extracted from user's natural language input"
+```
 
-**Can often infer:**
+**Branching:**
 
-- If the user mentions a Python script with `argparse` → read it to find CLI flags → suggest `build.type: flag` and extract levers automatically
-- If they mention a metric name → set `metric.name` and guess `direction`
-- If they say "accuracy" or "score" → `direction: maximize`
-- If they say "loss" or "error" or "cost" → `direction: minimize`
+- If `has_project_yaml` is true → ask user: "기존 프로젝트가 있습니다. 수정할까요, 새로 시작할까요?" Wait for answer before continuing.
+- If `data_files` is non-empty → go to **Phase 2: ANALYZE**
+- If `data_files` is empty → go to **Phase 2-ALT: ASK_DATA**
 
-**Smart behavior:**
+---
 
-- If you see a script file, **read it** to discover CLI arguments and suggest levers
-- If there's a data file, confirm its location and whether it needs preprocessing
-- Propose reasonable search spaces based on the baseline values (e.g., if baseline LR is 0.01, suggest [0.005, 0.01, 0.02, 0.05])
+### Phase 2: ANALYZE
 
-### Phase 3: Set Up Environment
+**Entry condition:** At least 1 data file found (from SCAN or from user-provided path)
 
-Once you have all the information, do these steps:
+**Actions (in this order):**
 
-1. **Initialize** if needed:
+1. **Check file size** — run `wc -l` or `ls -lh` on each data file. If >10,000 rows, only read first 50 rows.
+2. **Read sample** — use Read tool. CSV: header + first 20 rows. JSON/JSONL: first 5 objects.
+3. **Extract schema** — for each column: name, inferred type (numeric/categorical/text/date), example values.
+4. **Identify metric candidates** — numeric columns that look like optimization targets. For each: compute or estimate mean, min, max.
+5. **Identify lever candidates** — columns/parameters that could be varied:
+   - Categorical with ≤20 unique values → list all unique values
+   - Numeric with clear range → note the range
+6. **Check for issues** — missing values (%), obvious outliers, columns that need preprocessing.
 
-   ```bash
-   tiny-lab init
-   ```
+**If script files were also found, analyze them too:**
 
-   (Skip if already initialized — check for `research/` directory)
+- Read each script and look for `argparse`, `click`, `typer`, or CLI flag patterns
+- Extract flag names, default values, help text
+- Check if the script references any of the data files
 
-2. **Write `research/project.yaml`** with the concretized configuration. Use the Edit or Write tool. Example:
+**Required output to user (show ALL of this):**
+
+```
+I analyzed your environment:
+
+📊 Data: {filename} ({rows} rows, {cols} columns)
+  - Metric candidates: {col1} (mean: X, range: Y-Z), {col2} (mean: X, range: Y-Z)
+  - Lever candidates: {col3} ({n} categories: [val1, val2, ...]), {col4} (numeric, range: X-Y)
+  - Issues: {missing values, etc. or "none"}
+
+📝 Script: {filename}
+  - CLI flags: {--flag1 (default: X), --flag2 (default: Y), ...}
+  - References data: {yes/no, which file}
+
+Which metric do you want to optimize? Are these the right levers?
+```
+
+**After user responds** → go to **Phase 3: CONCRETIZE**
+
+---
+
+### Phase 2-ALT: ASK_DATA
+
+**Entry condition:** No data files found in SCAN
+
+**Required output to user (say exactly this):**
+
+```
+이 디렉토리에서 데이터 파일을 찾지 못했습니다.
+
+1. 데이터가 다른 경로에 있다 → 경로를 알려주세요
+2. 데이터를 아직 준비 안 했다 → 이 디렉토리에 넣어주면 분석해드릴게요
+3. 데이터 없이 진행하고 싶다 → 스크립트/명령어 기반으로 세팅할게요
+```
+
+**Branching (based on user response):**
+
+- User provides a path → read data from that path → go to **Phase 2: ANALYZE**
+- User says they'll add data → tell them to let you know when ready. When they respond, re-run **Phase 1: SCAN**
+- User wants to proceed without data → go to **Phase 3: CONCRETIZE** (skip data analysis, rely on user input and script analysis only)
+
+---
+
+### Phase 3: CONCRETIZE
+
+**Entry condition:** Phase 2 or 2-ALT complete
+
+**Required fields checklist:**
+
+| #   | Field                                           | How to fill                                                                                                                         |
+| --- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `name` (experiment name)                        | Infer from user intent. Propose, let user confirm.                                                                                  |
+| 2   | `description`                                   | Generate from intent. One sentence.                                                                                                 |
+| 3   | `metric.name` + `metric.direction`              | From ANALYZE metric candidates + user choice. Direction: "accuracy"/"score"/"revenue" → maximize, "loss"/"error"/"cost" → minimize. |
+| 4   | `baseline.command`                              | From script analysis (flags + defaults). If no script → ask user.                                                                   |
+| 5   | `levers` (name, flag, baseline, space for each) | From ANALYZE lever candidates + script flags. Propose search spaces from data ranges.                                               |
+| 6   | `run.type`                                      | Default: `command`. Only ask if user mentioned surface/pipeline.                                                                    |
+| 7   | `evaluate.type`                                 | Default: `stdout_json`. Only ask if output isn't JSON (e.g., screenshots → `llm`).                                                  |
+
+**Actions:**
+
+1. Check which fields are already filled from Phase 2 results + user responses
+2. For unfilled fields: **ask all missing fields in a single grouped question**. Do NOT ask one at a time.
+3. Fields 6 and 7 have safe defaults — do NOT ask about them unless the user's situation clearly needs a non-default value.
+4. If no baseline script exists and user has data, offer: "baseline 스크립트를 만들어 드릴까요?"
+
+**Inference rules for auto-filling:**
+
+- Script with argparse flags → `build.type: flag`, extract levers from flags
+- Script without flags but user wants code changes → `build.type: code`
+- User mentions "accuracy" or "score" → `metric.direction: maximize`
+- User mentions "loss" or "error" or "cost" → `metric.direction: minimize`
+- ANALYZE found categorical column with ≤10 values → `space: [all unique values]`
+- ANALYZE found numeric parameter → propose 4-5 values around the baseline (e.g., baseline=0.5 → space: [0.3, 0.5, 0.7, 1.0])
+
+**Exit condition:** All 7 fields filled → go to **Phase 4: SETUP**
+
+---
+
+### Phase 4: SETUP
+
+**Entry condition:** All 7 fields confirmed
+
+**Actions (execute in this exact order):**
+
+1. **Initialize** — run `tiny-lab init` if `is_initialized` is false. Skip if already initialized.
+
+2. **Write `research/project.yaml`** — use the confirmed field values:
 
    ```yaml
-   name: hotel-pricing-revpar
-   description: "Optimize hotel RevPAR by adjusting pricing parameters"
+   name: { name }
+   description: "{description}"
 
    build:
-     type: flag
+     type: { flag|script|code }
 
    run:
-     type: command
+     type: { command|surface|pipeline }
 
    evaluate:
-     type: stdout_json
+     type: { stdout_json|script|llm }
 
    baseline:
-     command: "python3 pricing_model.py --data data/bookings.csv --rate-adj 1.0 --season-weight 0.5"
+     command: "{baseline_command}"
 
    metric:
-     name: revpar
-     source: stdout_json
-     direction: maximize
+     name: { metric_name }
+     direction: { maximize|minimize }
 
    levers:
-     rate_adjustment:
-       flag: "--rate-adj"
-       baseline: 1.0
-       space: [0.8, 0.9, 1.0, 1.1, 1.2]
-     season_weight:
-       flag: "--season-weight"
-       baseline: 0.5
-       space: [0.3, 0.5, 0.7, 1.0]
+     { lever_name }:
+       flag: "{flag}"
+       baseline: { baseline_value }
+       space: [{ values }]
 
    rules:
      - "Change command-line flags only"
      - "Do not install packages"
    ```
 
-3. **Verify baseline runs** — execute the baseline command once to confirm it works and produces the expected metric:
-
-   ```bash
-   # Run the baseline command and check output
-   ```
-
-   If it fails, help the user fix it before proceeding.
-
-4. **Write `research/questions.yaml`** — create 2-3 research questions based on the levers:
+3. **Write `research/questions.yaml`** — generate 2-3 research questions from levers:
 
    ```yaml
    - id: Q0.1
@@ -174,46 +260,51 @@ Once you have all the information, do these steps:
      depends_on: []
      resolved_by: []
    - id: Q1.1
-     question: "Does increasing rate_adjustment above 1.0 improve RevPAR?"
+     question: "{question about first lever}"
      depends_on: [Q0.1]
      resolved_by: []
    ```
 
-5. **Write `research/hypothesis_queue.yaml`** — generate 3-5 initial hypotheses from the levers:
+4. **Write `research/hypothesis_queue.yaml`** — generate 3-5 hypotheses from lever spaces:
 
    ```yaml
    hypotheses:
      - id: H-001
        status: pending
-       lever: rate_adjustment
-       value: 1.1
-       description: "Increase rate adjustment from 1.0 to 1.1"
-     - id: H-002
-       status: pending
-       lever: season_weight
-       value: 0.7
-       description: "Increase season weight from 0.5 to 0.7"
+       lever: { lever_name }
+       value: { value_from_space }
+       description: "{one line description}"
    ```
 
-6. **Handle data** — if the user mentioned a dataset:
-   - Confirm the file exists at the specified path
-   - If it's elsewhere, suggest moving/linking it
-   - If preprocessing is needed, help set it up
+5. **Verify baseline** — run the baseline command and check output:
+   - Parse stdout for JSON containing `metric.name`
+   - **If success** (metric found in output) → record baseline value, go to **Phase 5: CONFIRM**
+   - **If failure** (error or no metric in output):
+     - Show the error to the user
+     - Attempt to fix (max 2 retries: adjust command, fix script, etc.)
+     - If still failing after 2 retries → ask user for help: "baseline 명령어가 동작하지 않습니다. 직접 확인해주시겠어요?"
 
-### Phase 4: Confirm & Launch
+---
 
-Show a summary of what was set up:
+### Phase 5: CONFIRM
+
+**Entry condition:** Phase 4 complete, baseline verified
+
+**Required output (show ALL of this):**
 
 ```
 Setup complete:
-- Project: hotel-pricing-revpar
-- Metric: revpar (maximize)
-- Levers: rate_adjustment (5 values), season_weight (4 values)
-- Initial hypotheses: 3
-- Baseline verified: ✓
+- Project: {name}
+- Metric: {metric_name} ({direction})
+- Levers: {lever1} ({n} values), {lever2} ({n} values), ...
+- Data: {data_path} ({rows} rows)  — or "none"
+- Initial hypotheses: {n}
+- Baseline verified: {metric_name} = {baseline_value} ✓
 
 Start the research loop? (tiny-lab run)
 ```
 
-If the user agrees, run `tiny-lab run`.
-If they want changes, go back and adjust.
+**Branching:**
+
+- User approves → run `tiny-lab run`, report PID
+- User wants changes → identify which phase to revisit, go back to that phase
