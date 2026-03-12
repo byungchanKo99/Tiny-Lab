@@ -8,21 +8,25 @@ Deterministic AI-driven research loop. Define levers, set a metric, and let the 
 pip install git+https://github.com/byungchanko/Tiny-Lab.git
 ```
 
-## 30-Second Setup (Claude Code)
+## 30-Second Setup
 
 ```bash
 cd your-project
-tiny-lab setup           # Install /research command (project-level)
-tiny-lab setup --global  # Or install globally for all projects
+tiny-lab init            # Scaffold project (auto-detects Claude Code or Codex CLI)
+tiny-lab init --global   # Also install /research command globally (~/.claude/)
 ```
 
-Then in any project directory:
+Then start research:
 
-```
+```bash
+# With Claude Code:
 /research 호텔 가격 최적화하고 싶어
+
+# With any provider:
+tiny-lab discover "optimize hotel pricing"
 ```
 
-Claude will ask what metric to optimize, what variables to experiment with, where the data is — then set up everything and start running.
+The AI will analyze your data, ask what metric to optimize, what variables to experiment with — then set up everything and start running.
 
 ## Manual Setup
 
@@ -51,21 +55,21 @@ tiny-lab run               # Start the loop (Ctrl+C to stop)
 
 ## CLI Commands
 
-| Command             | Description                                          |
-| ------------------- | ---------------------------------------------------- |
-| `tiny-lab init`     | Scaffold a new experiment project                    |
-| `tiny-lab discover` | Interactive research setup (works with any provider) |
-| `tiny-lab setup`    | Install `/research` for Claude Code (project-level)  |
-| `tiny-lab run`      | Start the research loop                              |
-| `tiny-lab status`   | Show current loop state                              |
-| `tiny-lab stop`     | Stop a running loop                                  |
-| `tiny-lab board`    | Show experiment results dashboard                    |
-| `tiny-lab generate` | Generate new hypotheses via AI                       |
+| Command             | Description                                               |
+| ------------------- | --------------------------------------------------------- |
+| `tiny-lab init`     | Scaffold a new experiment project (auto-detects provider) |
+| `tiny-lab discover` | Interactive research setup (works with any provider)      |
+| `tiny-lab run`      | Start the research loop                                   |
+| `tiny-lab status`   | Show current loop state                                   |
+| `tiny-lab stop`     | Stop a running loop                                       |
+| `tiny-lab board`    | Show experiment results dashboard                         |
+| `tiny-lab generate` | Generate new hypotheses via AI                            |
 
 ## Project Structure (after `tiny-lab init`)
 
 ```
 your-project/
+  AGENTS.md                              # Agent instructions (provider-agnostic)
   CLAUDE.md                              # Agent guide (auto-generated)
   research/
     project.yaml                         # Experiment config
