@@ -30,9 +30,14 @@ tiny-lab run
 
 **Stop it with:** `tiny-lab stop` (sends SIGTERM to the loop process)
 
-### Monitoring Checklist
+### Monitoring Checklist — DO NOT STOP AFTER INITIAL HYPOTHESES
 
-After starting the loop, periodically check:
+**Your initial hypotheses are just the seed.** The loop autonomously generates NEW hypotheses after the queue empties (GENERATE phase). These auto-generated experiments often find better results than your initial ones.
+
+**WRONG behavior:** Start loop → initial 5 hypotheses finish → report results → done.
+**CORRECT behavior:** Start loop → initial hypotheses finish → loop generates more → keep monitoring → report includes ALL results.
+
+After starting the loop, **continuously** check:
 
 ```bash
 tiny-lab status    # Is the loop alive? What state is it in?
@@ -48,15 +53,17 @@ tiny-lab board     # How are experiments going? WIN/LOSS ratio?
 | Many consecutive LOSS results       | Current direction isn't working          | Analyze patterns in ledger, propose a different approach                  |
 | Loop stopped unexpectedly           | Crash or circuit breaker triggered       | Check loop.log, restart if safe                                           |
 | All experiments are WIN             | Search space is too conservative         | Extend the space with more aggressive values                              |
+| Initial queue exhausted             | Loop enters GENERATE phase               | **Keep monitoring** — new experiments are being created automatically     |
 
 ### When User Returns
 
-Summarize the research:
+Summarize **ALL** research (not just your initial hypotheses):
 
-- How many experiments ran, WIN/LOSS breakdown
-- Best configuration found (which lever values produced the best metric)
-- What directions were explored
-- Recommended next steps
+- **Total** experiments run (initial + auto-generated), WIN/LOSS breakdown
+- Best configuration found — **may be from an auto-generated hypothesis**
+- What directions were explored (initial approach + what the loop discovered)
+- Whether the loop is still running
+- Recommended next steps (continue? stop? change direction?)
 
 ## Quick Start
 

@@ -55,14 +55,29 @@ The loop will:
 - When the queue is empty, generate new hypotheses autonomously
 - **Repeat indefinitely until stopped with `tiny-lab stop` or Ctrl+C**
 
-### 4. Monitor
+### 4. Monitor — YOUR PRIMARY JOB AFTER STARTING THE LOOP
 
-While the loop runs, periodically check:
+**The loop never stops on its own. Your initial hypotheses are just the STARTING POINT.**
+
+After the initial queue is exhausted, the loop enters GENERATE and creates NEW hypotheses autonomously — trying new lever values, adding new levers, extending search spaces. This means better results may appear AFTER your initial hypotheses are done.
+
+**DO NOT stop monitoring when your initial hypotheses finish.**
+**DO NOT report final results based only on your initial hypotheses.**
 
 ```bash
 tiny-lab status   # Is it alive? What phase?
-tiny-lab board    # Results dashboard
+tiny-lab board    # Results dashboard — check this REPEATEDLY
 ```
+
+**Monitoring loop (keep doing this while the loop runs):**
+
+1. Check `tiny-lab board` periodically
+2. If the loop generated new hypotheses and ran them → new results exist → update your understanding
+3. If the best result changed → note it
+4. Only report to the user when:
+   - The user asks for status
+   - The loop stops (circuit breaker, crash, or `tiny-lab stop`)
+   - You have enough data to make a meaningful recommendation
 
 **Intervene when:**
 
@@ -72,12 +87,15 @@ tiny-lab board    # Results dashboard
 
 ### 5. Report
 
-When the user returns, summarize:
+**Report must include ALL experiments, not just your initial hypotheses.**
 
-- Experiments run, WIN/LOSS ratio
-- Best configuration found
-- What was explored
-- Recommended next steps
+When reporting (user asks, or loop stops):
+
+- **Total** experiments run (including auto-generated ones), WIN/LOSS ratio
+- **Best configuration found** — this may be from an auto-generated hypothesis, not your initial ones
+- What was explored — initial hypotheses AND what the loop discovered on its own
+- Whether the loop is still running or stopped
+- Recommended next steps (continue loop? change direction? stop?)
 
 ## Key files
 
