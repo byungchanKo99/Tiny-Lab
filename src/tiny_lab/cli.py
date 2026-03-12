@@ -25,7 +25,9 @@ def main() -> None:
     sub.add_parser("stop", help="Stop the running loop")
     sub.add_parser("generate", help="Generate new hypotheses")
     sub.add_parser("board", help="Show experiment dashboard")
-    sub.add_parser("setup", help="Install /research command globally for Claude Code")
+    setup_parser = sub.add_parser("setup", help="Install /research command for Claude Code")
+    setup_parser.add_argument("--global", dest="global_install", action="store_true",
+                              help="Install globally to ~/.claude/ instead of project-level")
 
     args = parser.parse_args()
     project_dir = Path(args.project_dir).resolve()
@@ -43,7 +45,10 @@ def main() -> None:
         "board": cmd_board,
         "setup": cmd_setup,
     }
-    commands[args.command](project_dir)
+    if args.command == "setup":
+        cmd_setup(project_dir, global_install=args.global_install)
+    else:
+        commands[args.command](project_dir)
 
 
 def _templates_dir() -> Path:
@@ -97,27 +102,31 @@ def cmd_init(project_dir: Path) -> None:
     print("\nEdit research/project.yaml to configure your experiment, then run: tiny-lab run")
 
 
-def cmd_setup(project_dir: Path) -> None:
-    """Install /research command globally for Claude Code."""
+def cmd_setup(project_dir: Path, *, global_install: bool = False) -> None:
+    """Install /research command for Claude Code."""
     templates = _templates_dir()
-    home = Path.home()
-    claude_dir = home / ".claude"
 
-    global_copies = [
+    if global_install:
+        target_dir = Path.home() / ".claude"
+        scope = "globally"
+    else:
+        target_dir = project_dir / ".claude"
+        scope = f"for this project ({project_dir})"
+
+    copies = [
         ("claude_commands/research.md", "commands/research.md"),
     ]
 
     created = []
     updated = []
 
-    for src_rel, dst_rel in global_copies:
+    for src_rel, dst_rel in copies:
         src = templates / src_rel
-        dst = claude_dir / dst_rel
+        dst = target_dir / dst_rel
 
         dst.parent.mkdir(parents=True, exist_ok=True)
 
         if dst.exists():
-            # Update if content differs
             if dst.read_text() != src.read_text():
                 shutil.copy2(src, dst)
                 updated.append(str(dst))
@@ -137,15 +146,16 @@ def cmd_setup(project_dir: Path) -> None:
             print(f"  {f}")
 
     print(f"""
-Setup complete! You can now use /research anywhere in Claude Code.
+Setup complete {scope}! You can now use /research in Claude Code.
 
 Quick start:
-  cd your-project
   /research 하고 싶은 연구를 자연어로 설명
 
 Or manually:
-  tiny-lab init          # Scaffold project files
+  tiny-lab init          # Scaffold full project files
   tiny-lab run           # Start the research loop
+
+Tip: Use --global to install for all projects (~/.claude/).
 """)
 
 

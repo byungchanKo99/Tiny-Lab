@@ -11,7 +11,9 @@ pip install git+https://github.com/byungchanko/Tiny-Lab.git
 ## 30-Second Setup (Claude Code)
 
 ```bash
-tiny-lab setup    # Install /research command globally
+cd your-project
+tiny-lab setup           # Install /research command (project-level)
+tiny-lab setup --global  # Or install globally for all projects
 ```
 
 Then in any project directory:
@@ -49,15 +51,15 @@ tiny-lab run               # Start the loop (Ctrl+C to stop)
 
 ## CLI Commands
 
-| Command             | Description                                  |
-| ------------------- | -------------------------------------------- |
-| `tiny-lab init`     | Scaffold a new experiment project            |
-| `tiny-lab setup`    | Install `/research` for Claude Code globally |
-| `tiny-lab run`      | Start the research loop                      |
-| `tiny-lab status`   | Show current loop state                      |
-| `tiny-lab stop`     | Stop a running loop                          |
-| `tiny-lab board`    | Show experiment results dashboard            |
-| `tiny-lab generate` | Generate new hypotheses via AI               |
+| Command             | Description                                         |
+| ------------------- | --------------------------------------------------- |
+| `tiny-lab init`     | Scaffold a new experiment project                   |
+| `tiny-lab setup`    | Install `/research` for Claude Code (project-level) |
+| `tiny-lab run`      | Start the research loop                             |
+| `tiny-lab status`   | Show current loop state                             |
+| `tiny-lab stop`     | Stop a running loop                                 |
+| `tiny-lab board`    | Show experiment results dashboard                   |
+| `tiny-lab generate` | Generate new hypotheses via AI                      |
 
 ## Project Structure (after `tiny-lab init`)
 
