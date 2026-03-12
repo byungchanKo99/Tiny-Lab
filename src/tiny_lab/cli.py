@@ -313,7 +313,7 @@ Start with Phase 1: SCAN. Scan the current directory and proceed through the pha
         if not shutil.which(CODEX_BIN):
             print(f"Error: codex CLI not found. Install it or set agent.provider: claude")
             return
-        cmd = [CODEX_BIN, "exec", prompt, "--full-auto"]
+        cmd = [CODEX_BIN, "exec", prompt, "--full-auto", "--skip-git-repo-check"]
     else:
         if not shutil.which(CLAUDE_BIN):
             print(f"Error: claude CLI not found. Install it or set agent.provider: codex")

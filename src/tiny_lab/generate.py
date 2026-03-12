@@ -173,7 +173,7 @@ Log what you did and why to research/loop.log (append a summary line)."""
     try:
         result = run_claude_fn(prompt, allowed_tools="Read,Write,Edit,Bash", cwd=str(project_dir))
         if result.returncode != 0:
-            log(f"GENERATE: claude exited with code {result.returncode}")
+            log(f"GENERATE: AI subprocess exited with code {result.returncode}")
     except RuntimeError as e:
         log(f"GENERATE: {e}")
         return False
