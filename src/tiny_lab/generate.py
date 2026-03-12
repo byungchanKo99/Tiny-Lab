@@ -1,6 +1,8 @@
 """Hypothesis generation via Claude CLI subagent."""
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -166,7 +168,23 @@ IMPORTANT: Every hypothesis description should explain WHY, not just WHAT.
 Bad:  "Try learning_rate 0.05"
 Good: "Learning rate 0.01 won by 15% over 0.02 — try 0.05 to see if the trend continues or if we've overshot"
 
-Log what you did and why to research/loop.log (append a summary line)."""
+STEP 5: WRITE GENERATION SUMMARY
+
+After generating hypotheses, write a JSON summary file to research/.generate_summary.json:
+
+```json
+{{
+  "state": "EXPLORING|REFINING|SATURATED|STUCK",
+  "reasoning": "2-3 sentence explanation of your diagnosis and why you chose these hypotheses",
+  "best_so_far": {{"experiment_id": "EXP-XXX", "metric_value": 123.4, "config": "brief description"}},
+  "hypotheses_added": ["H-XX", "H-YY", ...],
+  "changes_made": ["extended lever X space", "added new lever Y", ...],
+  "experiments_analyzed": 10
+}}
+```
+
+This file will be overwritten each generation cycle. The loop will archive it.
+Also log what you did and why to research/loop.log (append a summary line)."""
 
     before = load_queue(project_dir)
 
@@ -182,4 +200,52 @@ Log what you did and why to research/loop.log (append a summary line)."""
     after = load_queue(project_dir)
     valid_count = _validate_new_entries(before, after, project_dir)
 
+    # Archive generation summary to history
+    _archive_generate_summary(project_dir, valid_count)
+
     return valid_count > 0
+
+
+def _archive_generate_summary(project_dir: Path, valid_count: int) -> None:
+    """Read .generate_summary.json (written by AI), archive to .generate_history.jsonl."""
+    summary_path = project_dir / "research" / ".generate_summary.json"
+    history_path = project_dir / "research" / ".generate_history.jsonl"
+
+    entry: dict[str, Any] = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "hypotheses_added_count": valid_count,
+    }
+
+    if summary_path.exists():
+        try:
+            summary = json.loads(summary_path.read_text())
+            entry.update(summary)
+        except json.JSONDecodeError:
+            log("GENERATE: could not parse .generate_summary.json")
+    else:
+        entry["state"] = "UNKNOWN"
+        entry["reasoning"] = "(AI did not write summary)"
+
+    with history_path.open("a") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    # Clean up the per-cycle file
+    summary_path.unlink(missing_ok=True)
+    log(f"GENERATE: archived summary (state={entry.get('state', '?')}, added={valid_count})")
+
+
+def load_generate_history(project_dir: Path) -> list[dict[str, Any]]:
+    """Load generation history for dashboard display."""
+    path = project_dir / "research" / ".generate_history.jsonl"
+    if not path.exists():
+        return []
+    rows = []
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return rows

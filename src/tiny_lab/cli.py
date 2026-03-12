@@ -333,7 +333,7 @@ def cmd_board(project_dir: Path) -> None:
     """Show experiment dashboard."""
     from .project import load_project
     from .ledger import load_ledger, get_baseline_metric
-    from .generate import load_queue
+    from .generate import load_queue, load_generate_history
 
     try:
         project = load_project(project_dir)
@@ -342,13 +342,36 @@ def cmd_board(project_dir: Path) -> None:
         return
 
     metric_name = project["metric"]["name"]
+    direction = project["metric"].get("direction", "minimize")
     ledger = load_ledger(project_dir)
     baseline = get_baseline_metric(project_dir, metric_name)
     queue = load_queue(project_dir)
 
     print(f"Project: {project['name']}")
-    print(f"Metric: {metric_name} (direction: {project['metric'].get('direction', 'minimize')})")
+    print(f"Metric: {metric_name} (direction: {direction})")
     print(f"Baseline {metric_name}: {baseline}")
+    print()
+
+    # Best result
+    best_row = None
+    for row in ledger:
+        if row.get("class") == "BASELINE":
+            continue
+        val = row.get("primary_metric", {}).get(metric_name)
+        if val is None:
+            continue
+        if best_row is None:
+            best_row = row
+        else:
+            best_val = best_row.get("primary_metric", {}).get(metric_name)
+            if direction == "maximize" and val > best_val:
+                best_row = row
+            elif direction == "minimize" and val < best_val:
+                best_row = row
+    if best_row:
+        bpm = best_row.get("primary_metric", {})
+        print(f"Best: {best_row['id']} — {metric_name}={bpm.get(metric_name)} (delta={bpm.get('delta_pct')}%) "
+              f"[{best_row.get('changed_variable')}={best_row.get('value')}]")
     print()
 
     # Win/Loss/Invalid counts
@@ -379,3 +402,24 @@ def cmd_board(project_dir: Path) -> None:
             print(f"{row.get('id', '?'):<10} {row.get('class', '?'):<12} {str(val):<15} {str(delta):<10} {desc}")
     else:
         print("No experiments yet.")
+
+    # Generation history
+    gen_history = load_generate_history(project_dir)
+    if gen_history:
+        print()
+        print("Generation History:")
+        print("-" * 80)
+        for entry in gen_history[-5:]:
+            ts = entry.get("timestamp", "?")[:19]
+            state = entry.get("state", "?")
+            added = entry.get("hypotheses_added_count", 0)
+            reasoning = entry.get("reasoning", "")[:60]
+            hyp_ids = ", ".join(entry.get("hypotheses_added", []))
+            print(f"  [{ts}] {state} — +{added} hypotheses")
+            if reasoning:
+                print(f"    Why: {reasoning}")
+            if hyp_ids:
+                print(f"    Added: {hyp_ids}")
+            changes = entry.get("changes_made", [])
+            if changes:
+                print(f"    Changes: {'; '.join(changes)}")
