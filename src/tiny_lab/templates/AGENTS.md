@@ -33,7 +33,15 @@ Discovery will scan data/scripts, analyze them, and set up everything.
 
 ### 3. Run the loop
 
+**CRITICAL: `tiny-lab run` is an INFINITE LOOP. It runs forever until explicitly stopped.**
+
+You MUST run it as a **background process**. Do NOT run it in the foreground and wait for it to complete — it will never complete.
+
 ```bash
+# CORRECT: run in background
+tiny-lab run &
+
+# WRONG: this will block forever
 tiny-lab run
 ```
 
@@ -45,7 +53,7 @@ The loop will:
 - Evaluate the result (WIN/LOSS/INVALID)
 - Record to `research/ledger.jsonl`
 - When the queue is empty, generate new hypotheses autonomously
-- Repeat until stopped
+- **Repeat indefinitely until stopped with `tiny-lab stop` or Ctrl+C**
 
 ### 4. Monitor
 
@@ -82,6 +90,7 @@ When the user returns, summarize:
 
 ## Important
 
+- **`tiny-lab run` is an INFINITE LOOP** — it never exits on its own. Always run it in the background and monitor with `tiny-lab status` / `tiny-lab board`. Stop it with `tiny-lab stop`.
 - The loop generates new hypotheses when the queue is empty — including adding new levers and extending search spaces
 - Don't modify `ledger.jsonl` — it's the source of truth
 - Use `tiny-lab stop` to stop, don't kill the process

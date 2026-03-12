@@ -7,10 +7,28 @@ This project uses the `tiny-lab` autonomous research loop. The loop runs experim
 You are not just a tool executor. You are the **research supervisor**. Your job:
 
 1. **Set up** the research (discovery mode → project.yaml → first hypotheses)
-2. **Start** the loop (`tiny-lab run`)
+2. **Start** the loop (`tiny-lab run &` — **MUST be background**, see below)
 3. **Monitor** the loop while it runs — check for problems, stalls, or exhausted search spaces
 4. **Evolve** the research — when current levers are exhausted, propose new directions
 5. **Report** findings to the user when they return
+
+### CRITICAL: `tiny-lab run` is an INFINITE LOOP
+
+**`tiny-lab run` runs forever.** It continuously picks hypotheses, runs experiments, generates new hypotheses, and repeats — indefinitely until stopped.
+
+**You MUST run it in the background.** If you run it in the foreground, your session will be blocked forever waiting for a command that never exits.
+
+```bash
+# CORRECT — run in background, then monitor
+tiny-lab run &
+tiny-lab status       # check if it's alive
+tiny-lab board        # check experiment results
+
+# WRONG — this blocks forever, you lose control
+tiny-lab run
+```
+
+**Stop it with:** `tiny-lab stop` (sends SIGTERM to the loop process)
 
 ### Monitoring Checklist
 
@@ -56,7 +74,7 @@ The discovery flow will analyze your data, propose metrics/levers, and set up ev
 
 ```bash
 tiny-lab status          # Check current loop state
-tiny-lab run             # Start the research loop (Ctrl+C to stop)
+tiny-lab run &           # Start the research loop IN BACKGROUND (runs forever!)
 tiny-lab stop            # Stop a running loop
 tiny-lab board           # Show experiment results dashboard
 tiny-lab generate        # Generate new hypotheses via AI
@@ -70,7 +88,7 @@ Or use `/research start|status|stop|generate|board` inside Claude Code.
 
 1. Edit `research/project.yaml` — set baseline command, metric name, levers with search spaces
 2. Add hypotheses to `research/hypothesis_queue.yaml` (or run `tiny-lab generate`)
-3. Run `tiny-lab run` — the loop picks hypotheses from the queue, runs them, and records results
+3. Run `tiny-lab run &` in the background — the loop picks hypotheses, runs experiments, and records results **indefinitely**
 
 ### Checking Results
 
