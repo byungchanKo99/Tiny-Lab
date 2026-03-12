@@ -169,12 +169,82 @@ class ResearchLoop:
                 return
             time.sleep(1)
 
+    def _ensure_baseline(self, project: dict[str, Any]) -> bool:
+        """Run baseline command and record to ledger if no BASELINE entry exists.
+
+        Returns True if baseline is available (already existed or successfully recorded).
+        """
+        metric_name = project["metric"]["name"]
+        if get_baseline_metric(self.project_dir, metric_name) is not None:
+            log("BASELINE: already recorded in ledger")
+            return True
+
+        baseline_cmd = project.get("baseline", {}).get("command")
+        if not baseline_cmd:
+            log("BASELINE: no baseline.command in project.yaml — cannot establish baseline")
+            return False
+
+        log(f"BASELINE: running baseline command: {baseline_cmd[:120]}")
+        try:
+            from .run import dispatch_run
+            run_result = dispatch_run(project, baseline_cmd, "BASELINE", self.project_dir)
+        except (subprocess.TimeoutExpired, ValueError) as e:
+            log(f"BASELINE: failed to run — {e}")
+            return False
+
+        if run_result.returncode != 0:
+            log(f"BASELINE: command failed (exit={run_result.returncode})")
+            log(f"BASELINE: stderr={run_result.stderr[:500]}")
+            return False
+
+        # Extract metric
+        from .evaluate import evaluate_stdout_json, evaluate_with_script
+        eval_type = project.get("evaluate", {}).get("type", "stdout_json")
+        if eval_type == "stdout_json":
+            metric_val = evaluate_stdout_json(project, run_result)
+        elif eval_type == "script":
+            metric_val = evaluate_with_script(project, run_result, "BASELINE", self.project_dir)
+        else:
+            # For LLM eval, baseline metric must be manually provided
+            log("BASELINE: evaluate.type=llm — baseline metric must be set manually")
+            return False
+
+        if metric_val is None:
+            log(f"BASELINE: could not extract {metric_name} from baseline output")
+            log(f"BASELINE: stdout={run_result.stdout[:500]}")
+            return False
+
+        entry = {
+            "id": "EXP-001",
+            "question": "Baseline measurement",
+            "family": project["name"],
+            "changed_variable": "baseline",
+            "value": "baseline",
+            "control": "EXP-001",
+            "status": "done",
+            "class": "BASELINE",
+            "primary_metric": {
+                metric_name: metric_val,
+                "baseline": metric_val,
+                "delta_pct": 0.0,
+            },
+            "decision": "baseline",
+            "notes": f"Command: {baseline_cmd}",
+        }
+        append_ledger(self.project_dir, entry)
+        log(f"BASELINE: recorded {metric_name}={metric_val}")
+        return True
+
     def _run_loop(self) -> int:
         project = load_project(self.project_dir)
         build_type = project.get("build", {}).get("type", "flag")
         run_type = project.get("run", {}).get("type", "surface")
         eval_type = project.get("evaluate", {}).get("type", "stdout_json")
         log(f"LOOP: started '{project['name']}' [build={build_type}, run={run_type}, eval={eval_type}]")
+
+        # Ensure baseline is recorded before any experiments
+        if not self._ensure_baseline(project):
+            log("LOOP: WARNING — no baseline metric available. First experiments will be INCONCLUSIVE.")
 
         state = State.CHECK_QUEUE
         hypothesis: dict[str, Any] | None = None
