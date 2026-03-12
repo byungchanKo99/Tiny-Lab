@@ -24,6 +24,7 @@ CIRCUIT_BREAKER_WINDOW = 20
 CIRCUIT_BREAKER_THRESHOLD = 5
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
 CLAUDE_MAX_TURNS = int(os.environ.get("CLAUDE_MAX_TURNS", "20"))
+CODEX_BIN = os.environ.get("CODEX_BIN", "codex")
 
 
 class State(Enum):
@@ -72,6 +73,26 @@ class ResearchLoop:
     def _handle_signal(self, signum: int, frame: Any) -> None:
         self._shutdown = True
 
+    def _get_provider(self) -> str:
+        """Get AI provider from project.yaml or env var."""
+        try:
+            project = load_project(self.project_dir)
+            return project.get("agent", {}).get("provider", "claude")
+        except FileNotFoundError:
+            return os.environ.get("TINYLAB_PROVIDER", "claude")
+
+    def _run_ai(
+        self,
+        prompt: str,
+        allowed_tools: str = "Read,Write,Edit",
+        max_turns: int | None = None,
+        cwd: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        provider = self._get_provider()
+        if provider == "codex":
+            return self._run_codex(prompt, cwd=cwd)
+        return self._run_claude(prompt, allowed_tools, max_turns, cwd)
+
     def _run_claude(
         self,
         prompt: str,
@@ -80,15 +101,27 @@ class ResearchLoop:
         cwd: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         if not shutil.which(CLAUDE_BIN):
-            raise RuntimeError(f"claude CLI not found ({CLAUDE_BIN})")
-        # Strip CLAUDECODE env var to allow subprocess claude invocations
-        # from within a Claude Code session (not truly nesting — independent CLI calls)
+            raise RuntimeError(f"claude CLI not found ({CLAUDE_BIN}). Set agent.provider: codex in project.yaml if using Codex.")
+        # Strip CLAUDECODE env var to allow subprocess invocations
+        # from within a Claude Code session
         env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
         return subprocess.run(
             [CLAUDE_BIN, "-p", prompt, "--allowedTools", allowed_tools,
              "--max-turns", str(max_turns or CLAUDE_MAX_TURNS), "--output-format", "text"],
             text=True, capture_output=True, cwd=cwd or str(self.project_dir),
             env=env,
+        )
+
+    def _run_codex(
+        self,
+        prompt: str,
+        cwd: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        if not shutil.which(CODEX_BIN):
+            raise RuntimeError(f"codex CLI not found ({CODEX_BIN}). Set agent.provider: claude in project.yaml if using Claude Code.")
+        return subprocess.run(
+            [CODEX_BIN, "exec", prompt, "-s", "workspace-write", "-a", "on-request"],
+            text=True, capture_output=True, cwd=cwd or str(self.project_dir),
         )
 
     def _check_circuit_breaker(self) -> bool:
@@ -172,7 +205,7 @@ class ResearchLoop:
                 log("GENERATE: queue empty, asking agent for new hypotheses")
                 project = load_project(self.project_dir)
                 before_count = len(pending_hypotheses(load_queue(self.project_dir)))
-                generate_hypotheses(project, self.project_dir, self._run_claude)
+                generate_hypotheses(project, self.project_dir, self._run_ai)
                 after_count = len(pending_hypotheses(load_queue(self.project_dir)))
 
                 if after_count > before_count:
@@ -207,7 +240,7 @@ class ResearchLoop:
                 project = load_project(self.project_dir)
                 exp_id = next_experiment_id(load_ledger(self.project_dir))
                 try:
-                    command = dispatch_build(project, hypothesis, self.project_dir, self._run_claude)
+                    command = dispatch_build(project, hypothesis, self.project_dir, self._run_ai)
                     log(f"BUILD[{build_type}]: {exp_id} -> {command[:120]}")
                     state = State.RUN
                 except (ValueError, RuntimeError) as e:

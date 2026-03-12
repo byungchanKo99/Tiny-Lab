@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import signal
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,8 @@ def main() -> None:
     sub.add_parser("stop", help="Stop the running loop")
     sub.add_parser("generate", help="Generate new hypotheses")
     sub.add_parser("board", help="Show experiment dashboard")
+    discover_parser = sub.add_parser("discover", help="Interactive research setup (works with any AI provider)")
+    discover_parser.add_argument("intent", nargs="*", help="What you want to research (natural language)")
     setup_parser = sub.add_parser("setup", help="Install /research command for Claude Code")
     setup_parser.add_argument("--global", dest="global_install", action="store_true",
                               help="Install globally to ~/.claude/ instead of project-level")
@@ -47,6 +50,8 @@ def main() -> None:
     }
     if args.command == "setup":
         cmd_setup(project_dir, global_install=args.global_install)
+    elif args.command == "discover":
+        cmd_discover(project_dir, " ".join(args.intent) if args.intent else "")
     else:
         commands[args.command](project_dir)
 
@@ -258,7 +263,7 @@ def cmd_generate(project_dir: Path) -> None:
     loop = ResearchLoop(project_dir)
 
     before = len(pending_hypotheses(load_queue(project_dir)))
-    generate_hypotheses(project, project_dir, loop._run_claude)
+    generate_hypotheses(project, project_dir, loop._run_ai)
     after = len(pending_hypotheses(load_queue(project_dir)))
 
     added = after - before
@@ -266,6 +271,65 @@ def cmd_generate(project_dir: Path) -> None:
         print(f"Generated {added} new hypotheses.")
     else:
         print("No new hypotheses generated.")
+
+
+def cmd_discover(project_dir: Path, intent: str = "") -> None:
+    """Interactive research setup using AI provider.
+
+    Portable alternative to /research slash command — works with any provider.
+    Reads research.md discovery instructions and runs the AI interactively.
+    """
+    from .loop import ResearchLoop, CLAUDE_BIN, CODEX_BIN
+
+    templates = _templates_dir()
+    research_md = templates / "claude_commands" / "research.md"
+
+    # Read the discovery mode instructions
+    instructions = research_md.read_text()
+
+    # Determine provider
+    project_yaml = project_dir / "research" / "project.yaml"
+    if project_yaml.exists():
+        data = yaml.safe_load(project_yaml.read_text()) or {}
+        provider = data.get("agent", {}).get("provider", "claude")
+    else:
+        provider = os.environ.get("TINYLAB_PROVIDER", "claude")
+
+    prompt = f"""You are running the /research discovery mode.
+
+USER INTENT: {intent if intent else "(user will describe interactively)"}
+
+Follow the Discovery Mode instructions below EXACTLY. Execute phases in order.
+The working directory is: {project_dir}
+
+{instructions}
+
+Start with Phase 1: SCAN. Scan the current directory and proceed through the phases."""
+
+    print(f"Starting discovery mode (provider: {provider})...")
+    print(f"Project directory: {project_dir}")
+    if intent:
+        print(f"Intent: {intent}")
+    print()
+
+    if provider == "codex":
+        if not shutil.which(CODEX_BIN):
+            print(f"Error: codex CLI not found. Install it or set agent.provider: claude")
+            return
+        cmd = [CODEX_BIN, "exec", prompt, "-s", "workspace-write", "-a", "on-request"]
+    else:
+        if not shutil.which(CLAUDE_BIN):
+            print(f"Error: claude CLI not found. Install it or set agent.provider: codex")
+            return
+        env_key = "CLAUDECODE"
+        cmd = [CLAUDE_BIN, "-p", prompt,
+               "--allowedTools", "Read,Write,Edit,Bash,Glob,Grep",
+               "--max-turns", "50", "--output-format", "text"]
+
+    # Run interactively (not captured — user sees output directly)
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+    result = subprocess.run(cmd, cwd=str(project_dir), env=env)
+    raise SystemExit(result.returncode)
 
 
 def cmd_board(project_dir: Path) -> None:

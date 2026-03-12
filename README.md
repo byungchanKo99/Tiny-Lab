@@ -51,15 +51,16 @@ tiny-lab run               # Start the loop (Ctrl+C to stop)
 
 ## CLI Commands
 
-| Command             | Description                                         |
-| ------------------- | --------------------------------------------------- |
-| `tiny-lab init`     | Scaffold a new experiment project                   |
-| `tiny-lab setup`    | Install `/research` for Claude Code (project-level) |
-| `tiny-lab run`      | Start the research loop                             |
-| `tiny-lab status`   | Show current loop state                             |
-| `tiny-lab stop`     | Stop a running loop                                 |
-| `tiny-lab board`    | Show experiment results dashboard                   |
-| `tiny-lab generate` | Generate new hypotheses via AI                      |
+| Command             | Description                                          |
+| ------------------- | ---------------------------------------------------- |
+| `tiny-lab init`     | Scaffold a new experiment project                    |
+| `tiny-lab discover` | Interactive research setup (works with any provider) |
+| `tiny-lab setup`    | Install `/research` for Claude Code (project-level)  |
+| `tiny-lab run`      | Start the research loop                              |
+| `tiny-lab status`   | Show current loop state                              |
+| `tiny-lab stop`     | Stop a running loop                                  |
+| `tiny-lab board`    | Show experiment results dashboard                    |
+| `tiny-lab generate` | Generate new hypotheses via AI                       |
 
 ## Project Structure (after `tiny-lab init`)
 
@@ -84,6 +85,9 @@ your-project/
 ```yaml
 name: hotel-pricing
 description: "Optimize hotel RevPAR by adjusting pricing parameters"
+
+agent:
+  provider: claude # claude | codex
 
 build:
   type: flag # flag | script | code
@@ -139,7 +143,9 @@ Your experiment script must print the metric as JSON to stdout:
 ## Requirements
 
 - Python 3.10+
-- [Claude Code](https://claude.ai/claude-code) (for `/research` command and AI features)
+- One of:
+  - [Claude Code](https://claude.ai/claude-code) — full experience (`/research` command, hooks, agents)
+  - [Codex CLI](https://github.com/openai/codex) — set `agent.provider: codex` in project.yaml
 
 ## Legacy
 

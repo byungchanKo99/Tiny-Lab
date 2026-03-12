@@ -1,6 +1,9 @@
 name: my-experiment
 description: "Describe your experiment here"
 
+agent:
+  provider: claude # claude | codex
+
 # lane: my-lane           # Optional: surface lane name
 # workdir: .              # Optional: working directory for commands
 
