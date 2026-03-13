@@ -4,9 +4,12 @@
   "required": [
     "state",
     "reasoning",
+    "best_so_far",
     "hypotheses_added",
+    "changes_made",
     "experiments_analyzed"
   ],
+  "additionalProperties": false,
   "properties": {
     "state": {
       "type": "string",
@@ -19,6 +22,8 @@
     },
     "best_so_far": {
       "type": "object",
+      "additionalProperties": false,
+      "required": ["experiment_id", "metric_value", "config"],
       "properties": {
         "experiment_id": { "type": "string" },
         "metric_value": { "type": "number" },
