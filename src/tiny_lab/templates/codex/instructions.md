@@ -77,6 +77,41 @@ The loop is designed to run indefinitely. **You must NEVER:**
 
 **If you think experiments are "enough"** — you're wrong. Let the loop continue.
 
+## Hypothesis Formats
+
+There are two hypothesis formats. Use **v2** when `optimize:` is configured in `research/project.yaml`.
+
+### v1 — Single-lever (classic)
+
+```yaml
+- id: H-001
+  status: pending
+  lever: learning_rate
+  value: "0.05"
+  description: "Lower learning rate to 0.05"
+```
+
+### v2 — Strategic approach + search space (when `optimize:` is configured)
+
+```yaml
+- id: H-001
+  status: pending
+  approach: xgboost_stacking
+  description: "XGBoost + LightGBM stacking ensemble"
+  reasoning: "Combine gradient boosting variants for better generalization"
+  search_space:
+    learning_rate: { type: float, low: 0.01, high: 0.3, log: true }
+    n_estimators: { type: int, low: 50, high: 500 }
+    max_depth: { type: int, low: 3, high: 10 }
+```
+
+**v2 key principle:** YOU decide the **strategy** (approach). The **optimizer** decides the **parameters**.
+
+- DO: Pick a new model family, ensemble method, or feature engineering approach
+- DON'T: Specify exact parameter values like `lever: lr, value: 0.05` — the optimizer handles this
+
+Search space parameter types: `float` (low/high, optional log), `int` (low/high), `categorical` (choices list).
+
 ## GENERATE Phase: Output Schema
 
 When the loop triggers you to generate hypotheses, write `research/.generate_summary.json` with these fields:

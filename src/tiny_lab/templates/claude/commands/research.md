@@ -320,7 +320,33 @@ Which metric do you want to optimize? Are these the right levers?
      resolved_by: []
    ```
 
-4. **Write `research/hypothesis_queue.yaml`** — generate 3-5 hypotheses from lever spaces:
+4. **Write `research/hypothesis_queue.yaml`** — generate 3-5 hypotheses.
+
+   **If `optimize:` is configured in project.yaml → use v2 format:**
+
+   ```yaml
+   hypotheses:
+     - id: H-001
+       status: pending
+       approach: logistic_regression
+       description: "Logistic Regression baseline for interpretability"
+       reasoning: "Start with a simple linear model before trying complex approaches"
+       search_space:
+         C: { type: float, low: 0.01, high: 10, log: true }
+         max_iter: { type: int, low: 100, high: 1000 }
+     - id: H-002
+       status: pending
+       approach: random_forest
+       description: "Random Forest with tree depth search"
+       reasoning: "Nonlinear model to capture feature interactions"
+       search_space:
+         n_estimators: { type: int, low: 50, high: 500 }
+         max_depth: { type: int, low: 3, high: 20 }
+   ```
+
+   v2 key principle: YOU pick the **strategy** (approach), the **optimizer** picks the **parameters**. Don't specify exact values — specify search ranges.
+
+   **Otherwise → use v1 format:**
 
    ```yaml
    hypotheses:

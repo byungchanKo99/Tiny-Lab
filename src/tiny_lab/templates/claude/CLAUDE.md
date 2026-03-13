@@ -142,8 +142,12 @@ tiny-lab board                          # visual overview
 tiny-lab run &
     │
     ├─ Picks pending hypothesis from queue
-    ├─ Runs experiment (baseline command + lever changes)
-    ├─ Records result to ledger.jsonl
+    ├─ Builds command (flag substitution or code changes)
+    ├─ OPTIMIZE: runs inner loop (if search_space defined)
+    │   └─ Pluggable: optuna | grid | random | custom
+    │   └─ No search_space → single run (classic behavior)
+    ├─ Evaluates result → WIN/LOSS/INVALID
+    ├─ Records to ledger.jsonl
     ├─ Picks next hypothesis...
     │
     ├─ Queue empty → enters GENERATE phase
@@ -200,17 +204,41 @@ tiny-lab status && tiny-lab board
 
 ### Adding Hypotheses Manually
 
-Append to `research/hypothesis_queue.yaml` following this exact format:
+There are two hypothesis formats. Use **v2** when `optimize:` is configured in project.yaml, otherwise use **v1**.
+
+#### v1 — Single-lever (classic)
 
 ```yaml
-- id: H-{next sequential number}
+- id: H-001
   status: pending
-  lever: { lever name from project.yaml levers }
-  value: { a value from that lever's space array }
-  description: "{one-line description of the change}"
+  lever: learning_rate
+  value: "0.05"
+  description: "Lower learning rate to 0.05"
 ```
 
 Required fields: `id`, `status`, `lever`, `value`, `description`.
+
+#### v2 — Strategic approach + search space (when `optimize:` is configured)
+
+```yaml
+- id: H-001
+  status: pending
+  approach: logistic_regression
+  description: "Logistic Regression baseline for interpretability"
+  reasoning: "Simple linear model as baseline before trying nonlinear approaches"
+  search_space:
+    C: { type: float, low: 0.01, high: 10, log: true }
+    max_iter: { type: int, low: 100, high: 1000 }
+```
+
+Required fields: `id`, `status`, `approach`, `description`.
+Optional: `search_space`, `reasoning`, `code_changes`, `references`, `optimize_type`.
+
+**Key principle:** In v2, YOU decide the **strategy** (approach), the **optimizer** decides the **parameters**. Don't specify exact values — specify ranges for the optimizer to search.
+
+- DO: `approach: xgboost_ensemble` + `search_space: {n_estimators: {type: int, low: 50, high: 500}}`
+- DON'T: `lever: n_estimators, value: "200"` (this is the optimizer's job)
+
 Valid statuses: `pending`, `running`, `done`, `skipped`.
 
 ### Editing project.yaml
@@ -241,7 +269,9 @@ The `research/project.yaml` file controls the experiment. Key sections:
 
 ### Ledger Entry (research/ledger.jsonl)
 
-Each line is a JSON object:
+Each line is a JSON object. v1 and v2 hypotheses produce slightly different entries:
+
+**v1 (single-lever):**
 
 ```json
 {
@@ -256,6 +286,28 @@ Each line is a JSON object:
     "metric_name": 1.23,
     "baseline": 1.45,
     "delta_pct": -15.17
+  },
+  "decision": "win"
+}
+```
+
+**v2 (optimized approach):**
+
+```json
+{
+  "id": "EXP-005",
+  "question": "Logistic Regression baseline for interpretability",
+  "family": "project-name",
+  "changed_variable": "logistic_regression",
+  "approach": "logistic_regression",
+  "status": "done",
+  "class": "WIN",
+  "primary_metric": { "accuracy": 0.89, "baseline": 0.85, "delta_pct": 4.71 },
+  "optimize_result": {
+    "best_value": 0.89,
+    "best_params": { "C": 1.5, "max_iter": 500 },
+    "n_trials": 20,
+    "total_seconds": 45.2
   },
   "decision": "win"
 }
