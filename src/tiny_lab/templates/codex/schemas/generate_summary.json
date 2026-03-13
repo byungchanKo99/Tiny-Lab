@@ -46,11 +46,6 @@
     "experiments_analyzed": {
       "type": "integer",
       "description": "Number of past experiments reviewed"
-    },
-    "references": {
-      "type": "array",
-      "items": { "type": "string" },
-      "description": "Papers, techniques, or prior experiments that inspired these hypotheses"
     }
   }
 }
