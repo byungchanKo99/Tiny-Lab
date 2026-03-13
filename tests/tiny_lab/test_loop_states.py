@@ -9,8 +9,15 @@ from unittest.mock import patch, MagicMock
 import pytest
 import yaml
 
-from tiny_lab.events import load_events
+from tiny_lab.events import load_events, reset_event_seq
 from tiny_lab.loop import ResearchLoop, State, CycleContext
+
+
+@pytest.fixture(autouse=True)
+def _reset_seq():
+    reset_event_seq()
+    yield
+    reset_event_seq()
 
 
 @pytest.fixture()
@@ -240,6 +247,32 @@ class TestHandleRecord:
         events = load_events(project_dir)
         event_types = [e["event"] for e in events]
         assert "experiment_done" in event_types
+
+    def test_record_events_include_loop_state(self, loop: ResearchLoop, project_dir: Path):
+        baseline = {
+            "id": "EXP-001", "question": "baseline", "family": "test",
+            "changed_variable": "baseline", "value": "baseline", "control": "EXP-001",
+            "status": "done", "class": "BASELINE",
+            "primary_metric": {"loss": 1.0, "baseline": 1.0, "delta_pct": 0.0},
+            "decision": "baseline",
+        }
+        (project_dir / "research" / "ledger.jsonl").write_text(json.dumps(baseline) + "\n")
+        _add_hypotheses(project_dir, [{"id": "H-1", "status": "running", "lever": "lr", "value": "0.05", "description": "test"}])
+
+        project = _load_project(project_dir)
+        ctx = CycleContext(
+            hypothesis={"id": "H-1", "lever": "lr", "value": "0.05", "description": "test"},
+            command="echo test", exp_id="EXP-002", new_metric=0.5, verdict="WIN",
+        )
+        loop._current_state = "record"
+        with patch.object(loop, "_sleep"):
+            loop._handle_record(ctx, project)
+
+        events = load_events(project_dir)
+        for ev in events:
+            assert ev["loop_state"] == "record"
+            assert ev["source"] == "tiny-lab"
+            assert "sequence" in ev
 
     def test_record_emits_new_best_event(self, loop: ResearchLoop, project_dir: Path):
         baseline = {

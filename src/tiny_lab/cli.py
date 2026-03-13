@@ -232,6 +232,7 @@ def cmd_run(project_dir: Path, *, on_event_cmd: str | None = None) -> None:
 def _build_status_data(project_dir: Path) -> dict[str, Any]:
     """Build structured status data."""
     from .ledger import load_ledger
+    from .events import load_events
 
     state_path = project_dir / "research" / ".loop_state.json"
     lock_path = project_dir / "research" / ".loop-lock"
@@ -285,6 +286,8 @@ def _build_status_data(project_dir: Path) -> dict[str, Any]:
         }
         for r in recent
     ]
+
+    data["recent_events"] = load_events(project_dir, last_n=5)
 
     return data
 
@@ -400,6 +403,7 @@ def _build_board_data(project_dir: Path) -> dict[str, Any] | None:
     from .project import load_project
     from .ledger import load_ledger, get_baseline_metric
     from .generate import load_queue, load_generate_history
+    from .events import load_events
 
     try:
         project = load_project(project_dir)
@@ -451,6 +455,7 @@ def _build_board_data(project_dir: Path) -> dict[str, Any] | None:
         "counts": counts,
         "queue_counts": queue_counts,
         "gen_history": load_generate_history(project_dir),
+        "recent_events": load_events(project_dir, last_n=10),
     }
 
 
@@ -500,6 +505,25 @@ def _format_board(data: dict[str, Any]) -> None:
             print(f"{row.get('id', '?'):<10} {row.get('class', '?'):<12} {str(val):<15} {str(delta):<10} {desc}")
     else:
         print("No experiments yet.")
+
+    recent_events = data.get("recent_events", [])
+    if recent_events:
+        print()
+        print("Events:")
+        for ev in recent_events:
+            ts = ev.get("timestamp", "")
+            # Show HH:MM:SS from ISO timestamp
+            time_part = ts[11:19] if len(ts) >= 19 else ts
+            event_name = ev.get("event", "?")
+            ev_data = ev.get("data", {})
+            detail_parts = []
+            for k, v in ev_data.items():
+                detail_parts.append(f"{k}={v}")
+            detail = " ".join(detail_parts)
+            line = f"  [{time_part}] {event_name}"
+            if detail:
+                line += f" ({detail})"
+            print(line)
 
     if gen_history:
         print()

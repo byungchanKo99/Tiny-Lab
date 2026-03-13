@@ -73,6 +73,7 @@ class ResearchLoop:
         self.provider = get_provider(self.project_dir)
         self.on_event_cmd = on_event_cmd
         self._shutdown = False
+        self._current_state: str | None = None
 
     def run(self) -> int:
         """Entry point: acquire lock, run loop, release lock."""
@@ -101,7 +102,8 @@ class ResearchLoop:
             return rc
 
     def _emit(self, event: EventType, data: dict[str, Any] | None = None) -> None:
-        emit_event(self.project_dir, event, data, self.on_event_cmd)
+        emit_event(self.project_dir, event, data, self.on_event_cmd,
+                   loop_state=self._current_state)
 
     def _handle_signal(self, signum: int, frame: Any) -> None:
         self._shutdown = True
@@ -348,6 +350,7 @@ class ResearchLoop:
         consecutive_errors = 0
 
         while not self._shutdown:
+            self._current_state = state.value
             self._save_state(state, {"hypothesis_id": ctx.hypothesis["id"] if ctx.hypothesis else None})
 
             # Reload project.yaml when AI may have modified it

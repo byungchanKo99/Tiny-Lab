@@ -7,7 +7,14 @@ from unittest.mock import patch
 
 import pytest
 
-from tiny_lab.events import EventType, emit_event, load_events
+from tiny_lab.events import EventType, emit_event, load_events, reset_event_seq
+
+
+@pytest.fixture(autouse=True)
+def _reset_seq():
+    reset_event_seq()
+    yield
+    reset_event_seq()
 
 
 @pytest.fixture()
@@ -26,6 +33,9 @@ class TestEmitEvent:
         assert record["event"] == "loop_started"
         assert record["data"]["pid"] == 123
         assert "timestamp" in record
+        assert record["source"] == "tiny-lab"
+        assert record["sequence"] == 1
+        assert "loop_state" in record
 
     def test_with_callback(self, project_dir: Path):
         with patch("tiny_lab.events.subprocess.Popen") as mock_popen:
@@ -73,3 +83,32 @@ class TestLoadEvents:
         events = load_events(project_dir, last_n=3)
         assert len(events) == 3
         assert events[0]["data"]["exp_id"] == "EXP-7"
+
+
+class TestEventSchema:
+    def test_sequence_increments(self, project_dir: Path):
+        emit_event(project_dir, EventType.LOOP_STARTED)
+        emit_event(project_dir, EventType.EXPERIMENT_DONE, {"exp_id": "EXP-001"})
+        events = load_events(project_dir)
+        assert events[0]["sequence"] == 1
+        assert events[1]["sequence"] == 2
+
+    def test_source_default(self, project_dir: Path):
+        emit_event(project_dir, EventType.LOOP_STARTED)
+        events = load_events(project_dir)
+        assert events[0]["source"] == "tiny-lab"
+
+    def test_source_custom(self, project_dir: Path):
+        emit_event(project_dir, EventType.LOOP_STARTED, source="nanoclaw")
+        events = load_events(project_dir)
+        assert events[0]["source"] == "nanoclaw"
+
+    def test_loop_state_passed(self, project_dir: Path):
+        emit_event(project_dir, EventType.EXPERIMENT_DONE, {"exp_id": "EXP-001"}, loop_state="record")
+        events = load_events(project_dir)
+        assert events[0]["loop_state"] == "record"
+
+    def test_loop_state_none_by_default(self, project_dir: Path):
+        emit_event(project_dir, EventType.LOOP_STARTED)
+        events = load_events(project_dir)
+        assert events[0]["loop_state"] is None

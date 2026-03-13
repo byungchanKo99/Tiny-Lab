@@ -21,17 +21,38 @@ class EventType(str, Enum):
     CIRCUIT_BREAKER_WARNING = "circuit_breaker_warning"
 
 
+_event_seq = 0
+
+
+def _next_seq() -> int:
+    global _event_seq
+    _event_seq += 1
+    return _event_seq
+
+
+def reset_event_seq() -> None:
+    """Reset sequence counter (for testing only)."""
+    global _event_seq
+    _event_seq = 0
+
+
 def emit_event(
     project_dir: Path,
     event: EventType,
     data: dict[str, Any] | None = None,
     on_event_cmd: str | None = None,
+    *,
+    source: str = "tiny-lab",
+    loop_state: str | None = None,
 ) -> None:
     """Write event to .events.jsonl and optionally fire a callback command."""
     try:
         record = {
             "event": event.value,
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source": source,
+            "loop_state": loop_state,
+            "sequence": _next_seq(),
             "data": data or {},
         }
         events_path = project_dir / "research" / ".events.jsonl"
