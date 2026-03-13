@@ -13,24 +13,115 @@ import yaml
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="tiny-lab", description="Deterministic AI-driven research loop")
-    parser.add_argument("--project-dir", default=".", help="Project root directory")
+    parser = argparse.ArgumentParser(
+        prog="tiny-lab",
+        description="Deterministic AI-driven research loop",
+        epilog="""\
+Lifecycle:
+  tiny-lab init                          # scaffold project (once)
+  tiny-lab discover "optimize accuracy"  # AI-guided setup → project.yaml + hypotheses
+  CYCLE_SLEEP=1 tiny-lab run &           # start infinite loop in background
+  tiny-lab status                        # confirm RUNNING
+  tiny-lab board                         # check WIN/LOSS results
+  tiny-lab stop                          # graceful shutdown when done
+
+The loop is an INFINITE state machine:
+  CHECK_QUEUE → SELECT → BUILD → RUN → EVALUATE → RECORD → CHECK_QUEUE
+  When queue empties → GENERATE (AI creates new hypotheses) → CHECK_QUEUE
+
+Environment variables:
+  CYCLE_SLEEP     Seconds between experiment cycles (default: 30, recommend: 1)
+  TINYLAB_PROVIDER  Force provider: "claude" or "codex" (default: auto-detect)
+  CLAUDE_MAX_TURNS  Max turns for Claude provider (default: 20)
+
+Key files (in research/):
+  project.yaml          Experiment config: baseline, metric, levers, rules
+  hypothesis_queue.yaml Hypothesis queue (pending/running/done/skipped)
+  ledger.jsonl          Experiment results (append-only, DO NOT modify)
+  loop.log              Loop execution log
+  .loop-lock            PID lock file (use 'tiny-lab stop', not kill)
+""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--project-dir", default=".", help="Project root directory (default: cwd)")
     sub = parser.add_subparsers(dest="command")
 
-    init_parser = sub.add_parser("init", help="Initialize a new experiment project")
+    init_parser = sub.add_parser(
+        "init",
+        help="Scaffold project: create research/ dir, config templates, agent instructions",
+        description="Creates research/ directory with project.yaml, hypothesis_queue.yaml, "
+                    "questions.yaml, and provider-specific agent configs. Auto-detects "
+                    "Claude Code or Codex CLI. Skips files that already exist.",
+    )
     init_parser.add_argument("--global", dest="global_install", action="store_true",
-                             help="Also install /research command globally to ~/.claude/")
-    sub.add_parser("run", help="Start the research loop")
-    sub.add_parser("status", help="Show loop status")
-    sub.add_parser("stop", help="Stop the running loop")
-    sub.add_parser("generate", help="Generate new hypotheses")
-    board_parser = sub.add_parser("board", help="Show experiment dashboard")
-    board_parser.add_argument("--export", choices=["csv", "json"], help="Export board data as CSV or JSON")
-    board_parser.add_argument("--plot", action="store_true", help="Show ASCII sparkline charts")
-    board_parser.add_argument("--html", metavar="FILE", nargs="?", const="research/report.html", help="Generate self-contained HTML report")
+                             help="Also install /research slash command to ~/.claude/ (Claude only)")
+
+    sub.add_parser(
+        "run",
+        help="Start the experiment loop (INFINITE — run in background with &)",
+        description="Starts the research loop state machine. This command NEVER exits on its own — "
+                    "it runs experiments indefinitely until stopped via 'tiny-lab stop' or circuit "
+                    "breaker (5 INVALID in last 20). MUST be run in background:\n\n"
+                    "  CYCLE_SLEEP=1 tiny-lab run > research/tiny_lab_run.out 2>&1 &\n\n"
+                    "The loop: picks hypothesis → builds command → runs experiment → evaluates "
+                    "result → records to ledger.jsonl → repeats. When queue empties, AI generates "
+                    "new hypotheses automatically (GENERATE phase).",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+    sub.add_parser(
+        "status",
+        help="Show loop state, queue counts, and last 5 experiment results",
+        description="Outputs: RUNNING/STOPPED, current state (select/run/evaluate/generate), "
+                    "queue breakdown (pending/done/skipped counts), and last 5 ledger entries "
+                    "with verdict (WIN/LOSS/INVALID) and metric values. Use this to confirm "
+                    "the loop is alive after starting, and to monitor progress.",
+    )
+
+    sub.add_parser(
+        "stop",
+        help="Send SIGTERM to running loop (graceful shutdown after current experiment)",
+        description="Reads PID from research/.loop-lock and sends SIGTERM. The loop finishes "
+                    "its current experiment, records the result, then exits cleanly. "
+                    "If the process is already dead, removes the stale lock file.",
+    )
+
+    sub.add_parser(
+        "generate",
+        help="Manually trigger AI hypothesis generation (normally automatic in loop)",
+        description="Calls the AI provider to analyze ledger.jsonl, diagnose research state "
+                    "(EXPLORING/REFINING/SATURATED/STUCK), and generate 3-5 new hypotheses. "
+                    "The AI may also modify project.yaml (add levers, extend search spaces, "
+                    "raise baseline). Useful for manual intervention without restarting the loop. "
+                    "Output: number of new hypotheses added to queue.",
+    )
+
+    board_parser = sub.add_parser(
+        "board",
+        help="Show experiment dashboard: best result, WIN/LOSS counts, metric trends",
+        description="Displays project name, metric, baseline, best experiment found, "
+                    "result class counts (WIN/LOSS/INVALID), queue status, last 10 experiments "
+                    "with delta%%, and generation history (AI reasoning for each GENERATE cycle). "
+                    "This is the primary way to understand research progress at a glance.",
+    )
+    board_parser.add_argument("--export", choices=["csv", "json"],
+                              help="Export ledger as CSV or JSON (id, class, lever, value, metric, delta%%)")
+    board_parser.add_argument("--plot", action="store_true",
+                              help="Add ASCII sparklines: metric trend over time + per-lever WIN/LOSS bars")
+    board_parser.add_argument("--html", metavar="FILE", nargs="?", const="research/report.html",
+                              help="Generate self-contained HTML report with Chart.js visualizations")
     board_parser.add_argument("-o", "--output", help="Output file path (for --export)")
-    discover_parser = sub.add_parser("discover", help="Interactive research setup (works with any AI provider)")
-    discover_parser.add_argument("intent", nargs="*", help="What you want to research (natural language)")
+
+    discover_parser = sub.add_parser(
+        "discover",
+        help="AI-guided interactive setup: analyze data → propose metrics/levers → write configs",
+        description="Starts an interactive AI session that: (1) scans for data/script files, "
+                    "(2) analyzes columns to find metric and lever candidates, (3) asks user to "
+                    "confirm choices, (4) writes project.yaml + hypothesis_queue.yaml + questions.yaml, "
+                    "(5) verifies baseline command works. Works with any provider (Claude/Codex).",
+    )
+    discover_parser.add_argument("intent", nargs="*",
+                                 help="Research intent in natural language (e.g. 'optimize hotel cancellation prediction')")
 
     args = parser.parse_args()
     project_dir = Path(args.project_dir).resolve()
