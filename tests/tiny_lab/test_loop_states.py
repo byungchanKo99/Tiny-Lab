@@ -9,6 +9,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 import yaml
 
+from tiny_lab.events import load_events
 from tiny_lab.loop import ResearchLoop, State, CycleContext
 
 
@@ -216,3 +217,75 @@ class TestHandleRecord:
         recorded = json.loads(lines[1])
         assert recorded["id"] == "EXP-002"
         assert recorded["class"] == "WIN"
+
+    def test_record_emits_experiment_done_event(self, loop: ResearchLoop, project_dir: Path):
+        baseline = {
+            "id": "EXP-001", "question": "baseline", "family": "test",
+            "changed_variable": "baseline", "value": "baseline", "control": "EXP-001",
+            "status": "done", "class": "BASELINE",
+            "primary_metric": {"loss": 1.0, "baseline": 1.0, "delta_pct": 0.0},
+            "decision": "baseline",
+        }
+        (project_dir / "research" / "ledger.jsonl").write_text(json.dumps(baseline) + "\n")
+        _add_hypotheses(project_dir, [{"id": "H-1", "status": "running", "lever": "lr", "value": "0.05", "description": "test"}])
+
+        project = _load_project(project_dir)
+        ctx = CycleContext(
+            hypothesis={"id": "H-1", "lever": "lr", "value": "0.05", "description": "test"},
+            command="echo test", exp_id="EXP-002", new_metric=0.5, verdict="WIN",
+        )
+        with patch.object(loop, "_sleep"):
+            loop._handle_record(ctx, project)
+
+        events = load_events(project_dir)
+        event_types = [e["event"] for e in events]
+        assert "experiment_done" in event_types
+
+    def test_record_emits_new_best_event(self, loop: ResearchLoop, project_dir: Path):
+        baseline = {
+            "id": "EXP-001", "question": "baseline", "family": "test",
+            "changed_variable": "baseline", "value": "baseline", "control": "EXP-001",
+            "status": "done", "class": "BASELINE",
+            "primary_metric": {"loss": 1.0, "baseline": 1.0, "delta_pct": 0.0},
+            "decision": "baseline",
+        }
+        (project_dir / "research" / "ledger.jsonl").write_text(json.dumps(baseline) + "\n")
+        _add_hypotheses(project_dir, [{"id": "H-1", "status": "running", "lever": "lr", "value": "0.05", "description": "test"}])
+
+        project = _load_project(project_dir)
+        ctx = CycleContext(
+            hypothesis={"id": "H-1", "lever": "lr", "value": "0.05", "description": "test"},
+            command="echo test", exp_id="EXP-002", new_metric=0.5, verdict="WIN",
+        )
+        with patch.object(loop, "_sleep"):
+            loop._handle_record(ctx, project)
+
+        events = load_events(project_dir)
+        new_best_events = [e for e in events if e["event"] == "new_best"]
+        assert len(new_best_events) == 1
+        assert new_best_events[0]["data"]["exp_id"] == "EXP-002"
+        assert new_best_events[0]["data"]["metric_value"] == 0.5
+
+
+class TestCircuitBreakerWarning:
+    def test_warning_event_emitted(self, loop: ResearchLoop, project_dir: Path):
+        """Warning emitted when invalid count reaches threshold-1."""
+        ledger_path = project_dir / "research" / "ledger.jsonl"
+        # Write exactly threshold-1 (4) INVALID entries
+        for i in range(4):
+            entry = {
+                "id": f"EXP-{i+2:03d}", "question": "q", "family": "test",
+                "changed_variable": "lr", "value": "0.05", "status": "done",
+                "class": "INVALID", "primary_metric": {"loss": None},
+                "decision": "invalid",
+            }
+            with ledger_path.open("a") as f:
+                f.write(json.dumps(entry) + "\n")
+
+        result = loop._check_circuit_breaker()
+        assert result is False  # not yet at threshold
+
+        events = load_events(project_dir)
+        warning_events = [e for e in events if e["event"] == "circuit_breaker_warning"]
+        assert len(warning_events) == 1
+        assert warning_events[0]["data"]["invalid_count"] == 4

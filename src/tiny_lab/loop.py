@@ -22,6 +22,7 @@ from .lock import LockManager
 from .logging import configure_log, log
 from .project import load_project
 from .providers import get_provider
+from .events import emit_event, EventType
 from .run import dispatch_run
 
 CYCLE_SLEEP = int(os.environ.get("CYCLE_SLEEP", "30"))
@@ -65,11 +66,12 @@ class CycleContext:
 class ResearchLoop:
     """Deterministic research loop with pluggable BUILD/RUN/EVALUATE."""
 
-    def __init__(self, project_dir: Path):
+    def __init__(self, project_dir: Path, on_event_cmd: str | None = None):
         self.project_dir = project_dir.resolve()
         self.lock_path = self.project_dir / "research" / ".loop-lock"
         self.state_path = self.project_dir / "research" / ".loop_state.json"
         self.provider = get_provider(self.project_dir)
+        self.on_event_cmd = on_event_cmd
         self._shutdown = False
 
     def run(self) -> int:
@@ -91,10 +93,15 @@ class ResearchLoop:
         signal.signal(signal.SIGTERM, self._handle_signal)
 
         with lock:
+            self._emit(EventType.LOOP_STARTED, {"pid": os.getpid()})
             rc = self._run_loop()
+            self._emit(EventType.LOOP_STOPPED, {"reason": "shutdown"})
             self.state_path.unlink(missing_ok=True)
             log("LOOP: stopped")
             return rc
+
+    def _emit(self, event: EventType, data: dict[str, Any] | None = None) -> None:
+        emit_event(self.project_dir, event, data, self.on_event_cmd)
 
     def _handle_signal(self, signum: int, frame: Any) -> None:
         self._shutdown = True
@@ -103,6 +110,11 @@ class ResearchLoop:
         rows = load_ledger(self.project_dir)
         recent = rows[-CIRCUIT_BREAKER_WINDOW:]
         invalid_count = sum(1 for r in recent if r.get("class") == "INVALID")
+        if invalid_count >= CIRCUIT_BREAKER_THRESHOLD - 1 and invalid_count < CIRCUIT_BREAKER_THRESHOLD:
+            self._emit(EventType.CIRCUIT_BREAKER_WARNING, {
+                "invalid_count": invalid_count,
+                "threshold": CIRCUIT_BREAKER_THRESHOLD,
+            })
         return invalid_count >= CIRCUIT_BREAKER_THRESHOLD
 
     def _recover_state(self) -> None:
@@ -170,6 +182,7 @@ class ResearchLoop:
         return State.GENERATE
 
     def _handle_generate(self, ctx: CycleContext, project: dict[str, Any]) -> State:
+        self._emit(EventType.GENERATE_ENTER)
         log("GENERATE: queue empty, asking agent for new hypotheses")
         before_count = len(pending_hypotheses(load_queue(self.project_dir)))
         generate_hypotheses(project, self.project_dir, self.provider)
@@ -267,6 +280,36 @@ class ResearchLoop:
             "notes": f"Command: {ctx.command}",
         }
         append_ledger(self.project_dir, entry)
+        self._emit(EventType.EXPERIMENT_DONE, {
+            "exp_id": ctx.exp_id,
+            "verdict": ctx.verdict,
+            "metric_value": ctx.new_metric,
+        })
+
+        # Detect new best result
+        if ctx.verdict == "WIN" and ctx.new_metric is not None:
+            direction = project["metric"].get("direction", "minimize")
+            ledger = load_ledger(self.project_dir)
+            is_best = True
+            for r in ledger[:-1]:  # exclude the entry we just appended
+                if r.get("class") in ("BASELINE", "INVALID"):
+                    continue
+                prev_val = r.get("primary_metric", {}).get(metric_name)
+                if prev_val is None:
+                    continue
+                if direction == "maximize" and prev_val >= ctx.new_metric:
+                    is_best = False
+                    break
+                elif direction == "minimize" and prev_val <= ctx.new_metric:
+                    is_best = False
+                    break
+            if is_best:
+                self._emit(EventType.NEW_BEST, {
+                    "exp_id": ctx.exp_id,
+                    "metric_value": ctx.new_metric,
+                    "config": f"{changed_var}={value}",
+                })
+
         self._mark_hypothesis(ctx.hypothesis, "done")
         log(f"RECORD: {ctx.exp_id} recorded as {ctx.verdict}")
 

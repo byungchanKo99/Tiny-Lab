@@ -194,6 +194,36 @@ This file will be overwritten each generation cycle. The loop will archive it.
 Also log what you did and why to research/loop.log (append a summary line)."""
 
 
+def _format_history(entries: list[dict[str, Any]]) -> str:
+    """Format recent generation history for prompt injection."""
+    if not entries:
+        return ""
+    lines = ["YOUR PREVIOUS GENERATION CYCLES (most recent last):",
+             "Review these to avoid repeating strategies. If you see a pattern, escalate.\n"]
+    for i, e in enumerate(entries, 1):
+        state = e.get("state", "?")
+        reasoning = e.get("reasoning", "")[:120]
+        added = e.get("hypotheses_added_count", 0)
+        changes = ", ".join(e.get("changes_made", []))
+        lines.append(f"  Cycle {i}: state={state}, +{added} hypotheses")
+        if reasoning:
+            lines.append(f"    Reasoning: {reasoning}")
+        if changes:
+            lines.append(f"    Changes: {changes}")
+    return "\n".join(lines)
+
+
+def _check_escalation(history: list[dict[str, Any]]) -> str | None:
+    """Force SATURATED if recent 2+ cycles are EXPLORING/REFINING."""
+    if len(history) < 2:
+        return None
+    recent = [h.get("state", "").upper() for h in history[-3:]]
+    non_saturated = sum(1 for s in recent if s in ("EXPLORING", "REFINING"))
+    if non_saturated >= 2:
+        return "SATURATED"
+    return None
+
+
 def generate_hypotheses(project: dict[str, Any], project_dir: Path, provider: Any) -> bool:
     """Generate new hypotheses using AI provider."""
     levers_desc = []
@@ -211,6 +241,23 @@ def generate_hypotheses(project: dict[str, Any], project_dir: Path, provider: An
         levers_text="\n".join(levers_desc),
         rules_text="\n".join("- " + r for r in project.get("rules", [])),
     )
+
+    # Inject generation history context
+    history = load_generate_history(project_dir)
+    history_text = _format_history(history[-5:])
+    if history_text:
+        prompt = history_text + "\n\n" + prompt
+
+    # Code-level escalation: force SATURATED if stuck in EXPLORING/REFINING
+    forced = _check_escalation(history)
+    if forced:
+        escalation_msg = (
+            f"MANDATORY ESCALATION: Your last generation cycles were "
+            f"{[h.get('state') for h in history[-3:]]}. "
+            f"You MUST classify state as {forced} and make bold structural changes. "
+            f"Do NOT classify as EXPLORING or REFINING."
+        )
+        prompt = escalation_msg + "\n\n" + prompt
 
     summary_path = project_dir / "research" / ".generate_summary.json"
     schema_path = Path(__file__).parent / "templates" / "codex" / "schemas" / "generate_summary.json"

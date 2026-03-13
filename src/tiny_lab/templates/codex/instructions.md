@@ -24,17 +24,26 @@ tiny-lab status       # check if it's alive
 tiny-lab board        # check experiment results
 ```
 
-### Monitoring — DO NOT STOP AFTER INITIAL HYPOTHESES
+### Your Role: Lab Manager (Not Executor)
 
-Your initial hypotheses are just the seed. The loop generates NEW hypotheses after the queue empties. These auto-generated experiments often find better results.
-
-**WRONG:** Start loop → initial 5 hypotheses finish → report results → done.
-**CORRECT:** Start loop → keep monitoring → report includes ALL results.
+The loop is an **independent autonomous process**. You supervise it, not drive it.
 
 ```bash
-tiny-lab status    # Is the loop alive?
-tiny-lab board     # Results + generation reasoning
+tiny-lab status --json   # action_needed tells you if intervention is needed
+tiny-lab board           # Results + generation reasoning
 ```
+
+When `action_needed` is true, check the `action_reasons` and act accordingly. When false, do nothing — the loop is working autonomously.
+
+**Event callbacks (optional):**
+
+```bash
+CYCLE_SLEEP=1 tiny-lab run --on-event "tiny-lab status --json > research/.last_status.json" &
+```
+
+### DO NOT STOP AFTER INITIAL HYPOTHESES
+
+Your initial hypotheses are just the seed. The loop generates NEW hypotheses after the queue empties. These auto-generated experiments often find better results.
 
 ### When User Returns
 

@@ -35,15 +35,23 @@ Report the PID and how to stop it (`tiny-lab stop`).
 **After starting, enter monitoring mode:**
 
 1. Wait 30-60 seconds for first experiments
-2. Run `tiny-lab status` to confirm the loop is alive
+2. Run `tiny-lab status --json` — check `action_needed` to decide if intervention is needed
 3. Run `tiny-lab board` to check progress
-4. Keep checking every 2-5 minutes until the user returns or the loop stops
-5. Do NOT consider the task "done" after initial hypotheses complete — the loop generates new ones automatically
+4. When `action_needed` is false, the loop is working autonomously — don't interrupt
+5. When `action_needed` is true, check `action_reasons` and act accordingly
+6. Do NOT consider the task "done" after initial hypotheses complete — the loop generates new ones automatically
+
+**Tip:** Use `--on-event` for automatic status updates:
+
+```bash
+CYCLE_SLEEP=1 tiny-lab run --on-event "tiny-lab status --json > research/.last_status.json" > research/tiny_lab_run.out 2>&1 &
+```
 
 ### `status`
 
 ```bash
-tiny-lab status
+tiny-lab status --json   # structured output with action_needed
+tiny-lab status          # human-readable
 ```
 
 ### `stop`

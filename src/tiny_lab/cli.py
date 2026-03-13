@@ -56,7 +56,7 @@ Key files (in research/):
     init_parser.add_argument("--global", dest="global_install", action="store_true",
                              help="Also install /research slash command to ~/.claude/ (Claude only)")
 
-    sub.add_parser(
+    run_parser = sub.add_parser(
         "run",
         help="Start the experiment loop (INFINITE — run in background with &)",
         description="Starts the research loop state machine. This command NEVER exits on its own — "
@@ -68,8 +68,12 @@ Key files (in research/):
                     "new hypotheses automatically (GENERATE phase).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    run_parser.add_argument("--on-event", metavar="CMD",
+        help="Shell command to execute on loop events. "
+             "Receives TINYLAB_EVENT and TINYLAB_EVENT_DATA env vars. "
+             "Example: --on-event 'tiny-lab status --json >> /tmp/lab.log'")
 
-    sub.add_parser(
+    status_parser = sub.add_parser(
         "status",
         help="Show loop state, queue counts, and last 5 experiment results",
         description="Outputs: RUNNING/STOPPED, current state (select/run/evaluate/generate), "
@@ -77,6 +81,8 @@ Key files (in research/):
                     "with verdict (WIN/LOSS/INVALID) and metric values. Use this to confirm "
                     "the loop is alive after starting, and to monitor progress.",
     )
+    status_parser.add_argument("--json", dest="as_json", action="store_true",
+                                help="Output structured JSON with action_needed field")
 
     sub.add_parser(
         "stop",
@@ -136,10 +142,12 @@ Key files (in research/):
         cmd_discover(project_dir, " ".join(args.intent) if args.intent else "")
     elif args.command == "board":
         cmd_board(project_dir, args)
+    elif args.command == "run":
+        cmd_run(project_dir, on_event_cmd=getattr(args, "on_event", None))
+    elif args.command == "status":
+        cmd_status(project_dir, as_json=getattr(args, "as_json", False))
     else:
         commands = {
-            "run": cmd_run,
-            "status": cmd_status,
             "stop": cmd_stop,
             "generate": cmd_generate,
         }
@@ -214,19 +222,21 @@ def cmd_init(project_dir: Path, *, global_install: bool = False) -> None:
 
 
 
-def cmd_run(project_dir: Path) -> None:
+def cmd_run(project_dir: Path, *, on_event_cmd: str | None = None) -> None:
     """Start the research loop."""
     from .loop import ResearchLoop
-    loop = ResearchLoop(project_dir)
+    loop = ResearchLoop(project_dir, on_event_cmd=on_event_cmd)
     raise SystemExit(loop.run())
 
 
-def cmd_status(project_dir: Path) -> None:
-    """Show loop status."""
+def _build_status_data(project_dir: Path) -> dict[str, Any]:
+    """Build structured status data."""
+    from .ledger import load_ledger
+    from .events import load_events, compute_action_needed
+
     state_path = project_dir / "research" / ".loop_state.json"
     lock_path = project_dir / "research" / ".loop-lock"
     queue_path = project_dir / "research" / "hypothesis_queue.yaml"
-    ledger_path = project_dir / "research" / "ledger.jsonl"
 
     # Loop alive?
     alive = False
@@ -239,44 +249,92 @@ def cmd_status(project_dir: Path) -> None:
         except (ValueError, OSError):
             pass
 
-    print(f"Loop: {'RUNNING (pid={pid})' if alive else 'STOPPED'}")
+    data: dict[str, Any] = {
+        "loop": "RUNNING" if alive else "STOPPED",
+        "pid": pid,
+    }
 
     # State
     if state_path.exists():
         try:
             state = json.loads(state_path.read_text())
-            print(f"State: {state.get('state', '?')} (updated: {state.get('updated_at', '?')})")
+            data["state"] = state.get("state")
+            data["updated_at"] = state.get("updated_at")
             ctx = state.get("context", {})
-            if ctx.get("hypothesis_id"):
-                print(f"Current hypothesis: {ctx['hypothesis_id']}")
+            data["current_hypothesis"] = ctx.get("hypothesis_id")
         except json.JSONDecodeError:
             pass
 
     # Queue stats
+    queue_counts: dict[str, int] = {}
     if queue_path.exists():
-        data = yaml.safe_load(queue_path.read_text()) or {}
-        hypotheses = data.get("hypotheses", [])
-        counts = {}
-        for h in hypotheses:
+        qdata = yaml.safe_load(queue_path.read_text()) or {}
+        for h in qdata.get("hypotheses", []):
             s = h.get("status", "unknown")
-            counts[s] = counts.get(s, 0) + 1
-        parts = [f"{k}: {v}" for k, v in sorted(counts.items())]
-        print(f"Queue: {', '.join(parts) if parts else 'empty'}")
+            queue_counts[s] = queue_counts.get(s, 0) + 1
+    data["queue"] = queue_counts
 
-    # Recent ledger
-    if ledger_path.exists():
-        lines = ledger_path.read_text().strip().splitlines()
-        recent = lines[-5:] if lines else []
-        if recent:
-            print("\nRecent experiments:")
-            for raw in recent:
-                try:
-                    row = json.loads(raw)
-                    metric = row.get("primary_metric", {})
-                    metric_val = {k: v for k, v in metric.items() if k not in ("baseline", "delta_pct")}
-                    print(f"  {row['id']}: {row.get('class', '?')} | {metric_val} | {row.get('question', '')[:60]}")
-                except json.JSONDecodeError:
-                    pass
+    # Recent ledger entries
+    ledger = load_ledger(project_dir)
+    recent = ledger[-5:]
+    data["recent_experiments"] = [
+        {
+            "id": r.get("id"),
+            "class": r.get("class"),
+            "metric": {k: v for k, v in r.get("primary_metric", {}).items() if k not in ("baseline", "delta_pct")},
+            "description": r.get("question", "")[:60],
+        }
+        for r in recent
+    ]
+
+    # Action needed
+    events = load_events(project_dir)
+    needed, reasons = compute_action_needed(
+        loop_alive=alive,
+        events=events,
+        ledger=ledger,
+        queue_counts=queue_counts,
+        lock_exists=lock_path.exists(),
+    )
+    data["action_needed"] = needed
+    data["action_reasons"] = reasons
+
+    return data
+
+
+def _format_status(data: dict[str, Any]) -> None:
+    """Print human-readable status from data dict."""
+    pid = data.get("pid")
+    print(f"Loop: {data['loop']}" + (f" (pid={pid})" if pid else ""))
+
+    if data.get("state"):
+        print(f"State: {data['state']} (updated: {data.get('updated_at', '?')})")
+    if data.get("current_hypothesis"):
+        print(f"Current hypothesis: {data['current_hypothesis']}")
+
+    queue = data.get("queue", {})
+    parts = [f"{k}: {v}" for k, v in sorted(queue.items())]
+    print(f"Queue: {', '.join(parts) if parts else 'empty'}")
+
+    recent = data.get("recent_experiments", [])
+    if recent:
+        print("\nRecent experiments:")
+        for row in recent:
+            print(f"  {row['id']}: {row.get('class', '?')} | {row.get('metric', {})} | {row.get('description', '')}")
+
+    if data.get("action_needed"):
+        print(f"\nAction needed:")
+        for reason in data.get("action_reasons", []):
+            print(f"  - {reason}")
+
+
+def cmd_status(project_dir: Path, *, as_json: bool = False) -> None:
+    """Show loop status."""
+    data = _build_status_data(project_dir)
+    if as_json:
+        print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
+    else:
+        _format_status(data)
 
 
 def cmd_stop(project_dir: Path) -> None:
