@@ -43,11 +43,24 @@ def get_provider(project_dir: Path, provider_name: str | None = None) -> AIProvi
 
 
 def detect_provider() -> str:
-    """Auto-detect AI provider from installed CLIs. If both available, ask user."""
+    """Auto-detect AI provider from installed CLIs.
+
+    Resolution: TINYLAB_PROVIDER env var → single CLI detected → prompt user.
+    Non-interactive environments (no tty) default to 'claude' when both are present.
+    """
+    # Env var takes priority — no prompt needed
+    env = os.environ.get("TINYLAB_PROVIDER", "").strip().lower()
+    if env in ("claude", "codex"):
+        return env
+
     has_claude = shutil.which("claude") is not None
     has_codex = shutil.which("codex") is not None
 
     if has_claude and has_codex:
+        # Non-interactive (piped stdin, agent subprocess) → default to claude
+        import sys
+        if not sys.stdin.isatty():
+            return "claude"
         print("Detected both Claude Code and Codex CLI.")
         while True:
             choice = input("Which provider? [claude/codex] (default: claude): ").strip().lower()
