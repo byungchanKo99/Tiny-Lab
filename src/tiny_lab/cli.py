@@ -70,6 +70,9 @@ Key files (in research/):
                     "new hypotheses automatically (GENERATE phase).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    run_parser.add_argument("--until-idle", action="store_true",
+        help="Stop the loop when the initial queue is exhausted instead of generating new hypotheses. "
+             "Use for finite comparisons (e.g. 'compare 5 models').")
     run_parser.add_argument("--on-event", metavar="CMD",
         help="Shell command to execute on loop events. "
              "Receives TINYLAB_EVENT and TINYLAB_EVENT_DATA env vars. "
@@ -145,7 +148,8 @@ Key files (in research/):
     elif args.command == "board":
         cmd_board(project_dir, args)
     elif args.command == "run":
-        cmd_run(project_dir, on_event_cmd=getattr(args, "on_event", None))
+        cmd_run(project_dir, on_event_cmd=getattr(args, "on_event", None),
+                until_idle=getattr(args, "until_idle", False))
     elif args.command == "status":
         cmd_status(project_dir, as_json=getattr(args, "as_json", False))
     else:
@@ -236,12 +240,20 @@ def cmd_init(project_dir: Path, *, global_install: bool = False, update: bool = 
     else:
         print("Start with: tiny-lab discover <what you want to research>")
 
+    print("\n" + "=" * 60)
+    print("AGENT RULES:")
+    print("1. NEVER run `tiny-lab stop` unless the user explicitly asks.")
+    print("2. Always run in background: tiny-lab run > research/tiny_lab_run.out 2>&1 &")
+    print("3. For finite comparisons: tiny-lab run --until-idle")
+    print("4. The loop auto-generates new hypotheses. Do NOT stop it early.")
+    print("=" * 60)
 
 
-def cmd_run(project_dir: Path, *, on_event_cmd: str | None = None) -> None:
+
+def cmd_run(project_dir: Path, *, on_event_cmd: str | None = None, until_idle: bool = False) -> None:
     """Start the research loop."""
     from .loop import ResearchLoop
-    loop = ResearchLoop(project_dir, on_event_cmd=on_event_cmd)
+    loop = ResearchLoop(project_dir, on_event_cmd=on_event_cmd, until_idle=until_idle)
     raise SystemExit(loop.run())
 
 
@@ -255,6 +267,8 @@ def _format_status(data: dict[str, Any]) -> None:
     """Print human-readable status from data dict."""
     pid = data.get("pid")
     print(f"Loop: {data['loop']}" + (f" (pid={pid})" if pid else ""))
+    if data["loop"] == "RUNNING":
+        print("Reminder: Do NOT run `tiny-lab stop` unless the user explicitly asks.")
 
     if data.get("state"):
         print(f"State: {data['state']} (updated: {data.get('updated_at', '?')})")

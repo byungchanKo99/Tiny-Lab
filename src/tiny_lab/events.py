@@ -20,6 +20,7 @@ class EventType(str, Enum):
     NEW_BEST = "new_best"
     GENERATE_ENTER = "generate_enter"
     CIRCUIT_BREAKER_WARNING = "circuit_breaker_warning"
+    IDLE_STOP = "idle_stop"
 
 
 _event_seq = 0

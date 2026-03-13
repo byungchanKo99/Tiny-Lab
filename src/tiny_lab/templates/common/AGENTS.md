@@ -33,17 +33,19 @@ Discovery will scan data/scripts, analyze them, and set up everything.
 
 ### 3. Run the loop
 
-**CRITICAL: `tiny-lab run` is an INFINITE LOOP. It runs forever until explicitly stopped.**
-
-You MUST run it as a **background process**. Do NOT run it in the foreground and wait for it to complete — it will never complete.
+**Choose the right mode based on the user's intent:**
 
 ```bash
-# CORRECT: run in background
-tiny-lab run &
+# Infinite mode (default) — open-ended optimization, never exits on its own
+# Use for: "optimize accuracy", "find best params", "improve performance"
+CYCLE_SLEEP=1 tiny-lab run > research/tiny_lab_run.out 2>&1 &
 
-# WRONG: this will block forever
-tiny-lab run
+# Finite mode (--until-idle) — stops when queue is empty, no GENERATE phase
+# Use for: "compare these 5 models", "test these configs", bounded comparisons
+CYCLE_SLEEP=1 tiny-lab run --until-idle > research/tiny_lab_run.out 2>&1 &
 ```
+
+You MUST run it as a **background process**. Do NOT run it in the foreground.
 
 The loop will:
 
@@ -52,8 +54,8 @@ The loop will:
 - Run the experiment
 - Evaluate the result (WIN/LOSS/INVALID)
 - Record to `research/ledger.jsonl`
-- When the queue is empty, generate new hypotheses autonomously
-- **Repeat indefinitely until stopped with `tiny-lab stop` or Ctrl+C**
+- **Infinite mode:** When the queue is empty, generate new hypotheses autonomously and repeat indefinitely
+- **Until-idle mode:** When the queue is empty, stop automatically
 
 ### 4. Monitor — YOUR PRIMARY JOB AFTER STARTING THE LOOP
 

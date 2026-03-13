@@ -23,11 +23,17 @@ Parse `$ARGUMENTS` for the subcommand:
 
 ### `start`
 
-Start the research loop **in the background**:
+Determine the right mode based on user intent:
+
+- **Finite comparison** ("compare N models", "test these configs") → `--until-idle`
+- **Open-ended optimization** ("optimize", "improve", "find best") → default (infinite)
 
 ```bash
+# Infinite mode (default)
 CYCLE_SLEEP=1 tiny-lab run > research/tiny_lab_run.out 2>&1 &
-echo "Loop started (pid=$!)"
+
+# Finite mode — stops when queue is empty
+CYCLE_SLEEP=1 tiny-lab run --until-idle > research/tiny_lab_run.out 2>&1 &
 ```
 
 Report the PID and how to stop it (`tiny-lab stop`).
@@ -35,9 +41,10 @@ Report the PID and how to stop it (`tiny-lab stop`).
 **After starting:**
 
 1. Run `tiny-lab status` to confirm the loop is alive
-2. The loop is fully autonomous — it generates new hypotheses, escalates when stuck, and keeps running
-3. Do NOT consider the task "done" after initial hypotheses complete — the loop generates new ones automatically
-4. When the user returns, run `tiny-lab board` to summarize all results
+2. The loop is fully autonomous — it generates new hypotheses, escalates when stuck, and keeps running (infinite mode)
+3. In `--until-idle` mode, the loop stops automatically when the queue is exhausted
+4. Do NOT run `tiny-lab stop` unless the user explicitly asks — use `--until-idle` for finite tasks
+5. When the user returns, run `tiny-lab board` to summarize all results
 
 ### `status`
 

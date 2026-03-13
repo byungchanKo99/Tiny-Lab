@@ -12,28 +12,36 @@ You are not just a tool executor. You are the **research supervisor**. Your job:
 4. **Evolve** the research — when current levers are exhausted, propose new directions
 5. **Report** findings to the user when they return
 
-### CRITICAL: `tiny-lab run` is an INFINITE LOOP
+### Two Research Modes
 
-**`tiny-lab run` runs forever.** It continuously picks hypotheses, runs experiments, generates new hypotheses, and repeats — indefinitely until stopped.
+**Choose the right mode based on the user's intent:**
 
-**You MUST run it in the background.** If you run it in the foreground, your session will be blocked forever waiting for a command that never exits.
+| User Intent                              | Mode                    | Command                     |
+| ---------------------------------------- | ----------------------- | --------------------------- |
+| "Compare 5 models", "test these configs" | **Finite** (until-idle) | `tiny-lab run --until-idle` |
+| "Optimize accuracy", "find best params"  | **Infinite** (default)  | `tiny-lab run`              |
+
+**Finite mode (`--until-idle`):** Runs all queued hypotheses, then stops automatically. No GENERATE phase. Use for bounded comparisons where the user has a specific set of things to test.
+
+**Infinite mode (default):** Runs forever — picks hypotheses, runs experiments, generates new hypotheses, and repeats indefinitely until stopped. Use for open-ended optimization.
+
+### CRITICAL: Always run in background
+
+Both modes MUST be run in the background:
 
 ```bash
-# CORRECT — run in background with output capture, then monitor
+# Infinite mode (default) — never exits on its own
 CYCLE_SLEEP=1 tiny-lab run > research/tiny_lab_run.out 2>&1 &
-echo "Loop started (pid=$!)"
-tiny-lab status       # check if it's alive
-tiny-lab board        # check experiment results
 
-# WRONG — this blocks forever (infinite loop), you lose control
-tiny-lab run
+# Finite mode — exits when queue is empty
+CYCLE_SLEEP=1 tiny-lab run --until-idle > research/tiny_lab_run.out 2>&1 &
 ```
 
 **Stop it with:** `tiny-lab stop` (sends SIGTERM to the loop process)
 
-### ABSOLUTE RULE: NEVER STOP THE LOOP YOURSELF
+### ABSOLUTE RULE: NEVER STOP THE LOOP YOURSELF (Infinite Mode)
 
-The loop is designed to run indefinitely. **You must NEVER:**
+When running in infinite mode, **you must NEVER:**
 
 - Run `tiny-lab stop` unless the user explicitly asks you to stop it
 - Run `kill`, `kill -9`, `kill -KILL`, or any signal to the loop process
@@ -43,6 +51,8 @@ The loop is designed to run indefinitely. **You must NEVER:**
 **The loop keeps running even after you respond.** When you summarize results and the user doesn't give further instructions, the loop still runs in the background. That's correct behavior. The loop will autonomously generate new hypotheses, try new approaches, and keep improving — this is the whole point.
 
 **If you think experiments are "enough"** — you're wrong. The GENERATE phase will try ensembles, new models, feature engineering, and other strategies you haven't considered. Let it run.
+
+**For finite comparisons, use `--until-idle` instead of stopping the loop manually.** This way the loop exits cleanly after all queued hypotheses are done.
 
 ### The Loop is Fully Autonomous
 

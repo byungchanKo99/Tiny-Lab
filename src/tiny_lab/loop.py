@@ -68,12 +68,13 @@ class CycleContext:
 class ResearchLoop:
     """Deterministic research loop with pluggable BUILD/RUN/EVALUATE."""
 
-    def __init__(self, project_dir: Path, on_event_cmd: str | None = None):
+    def __init__(self, project_dir: Path, on_event_cmd: str | None = None, *, until_idle: bool = False):
         self.project_dir = project_dir.resolve()
         self.lock_path = _lock_path(self.project_dir)
         self.state_path = _state_path(self.project_dir)
         self.provider = get_provider(self.project_dir)
         self.on_event_cmd = on_event_cmd
+        self.until_idle = until_idle
         self._shutdown = False
         self._current_state: str | None = None
 
@@ -183,6 +184,11 @@ class ResearchLoop:
         if pending:
             ctx.consecutive_generate_failures = 0
             return State.SELECT
+        if self.until_idle:
+            log("UNTIL-IDLE: queue exhausted, stopping.")
+            self._emit(EventType.IDLE_STOP, {"reason": "queue_exhausted"})
+            self._shutdown = True
+            return State.CHECK_QUEUE
         return State.GENERATE
 
     def _handle_generate(self, ctx: CycleContext, project: dict[str, Any]) -> State:
@@ -346,6 +352,8 @@ class ResearchLoop:
         build_type = project.get("build", {}).get("type", "flag")
         run_type = project.get("run", {}).get("type", "surface")
         eval_type = project.get("evaluate", {}).get("type", "stdout_json")
+        mode = "until-idle" if self.until_idle else "infinite"
+        log(f"LOOP: mode={mode}")
         log(f"LOOP: started '{project['name']}' [build={build_type}, run={run_type}, eval={eval_type}, provider={self.provider.name}]")
 
         if not ensure_baseline(project, self.project_dir):

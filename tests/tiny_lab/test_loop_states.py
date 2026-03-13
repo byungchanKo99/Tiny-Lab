@@ -374,3 +374,53 @@ class TestExperimentReports:
         with patch.object(loop, "_write_experiment_report", side_effect=OSError("disk full")):
             with patch.object(loop, "_sleep"):
                 loop._handle_record(ctx, project)  # should not raise
+
+
+class TestUntilIdle:
+    """Tests for --until-idle mode."""
+
+    @pytest.fixture()
+    def idle_loop(self, project_dir: Path) -> ResearchLoop:
+        with patch("tiny_lab.loop.get_provider") as mock_provider:
+            provider = MagicMock()
+            provider.name = "mock"
+            mock_provider.return_value = provider
+            return ResearchLoop(project_dir, until_idle=True)
+
+    def test_until_idle_stops_when_queue_empty(self, idle_loop: ResearchLoop, project_dir: Path):
+        """until_idle=True: empty queue → shutdown instead of GENERATE."""
+        project = _load_project(project_dir)
+        ctx = CycleContext()
+        state = idle_loop._handle_check_queue(ctx, project)
+        assert idle_loop._shutdown is True
+        assert state == State.CHECK_QUEUE
+
+    def test_until_idle_emits_idle_stop_event(self, idle_loop: ResearchLoop, project_dir: Path):
+        """until_idle=True: IDLE_STOP event is emitted when queue exhausted."""
+        project = _load_project(project_dir)
+        ctx = CycleContext()
+        idle_loop._handle_check_queue(ctx, project)
+
+        events = load_events(project_dir)
+        idle_events = [e for e in events if e["event"] == "idle_stop"]
+        assert len(idle_events) == 1
+        assert idle_events[0]["data"]["reason"] == "queue_exhausted"
+
+    def test_until_idle_selects_when_pending(self, idle_loop: ResearchLoop, project_dir: Path):
+        """until_idle=True: pending hypotheses → SELECT as normal."""
+        _add_hypotheses(project_dir, [
+            {"id": "H-1", "status": "pending", "lever": "lr", "value": "0.05", "description": "test"},
+        ])
+        project = _load_project(project_dir)
+        ctx = CycleContext()
+        state = idle_loop._handle_check_queue(ctx, project)
+        assert state == State.SELECT
+        assert idle_loop._shutdown is False
+
+    def test_default_mode_generates_when_empty(self, loop: ResearchLoop, project_dir: Path):
+        """until_idle=False (default): empty queue → GENERATE as before."""
+        project = _load_project(project_dir)
+        ctx = CycleContext()
+        state = loop._handle_check_queue(ctx, project)
+        assert state == State.GENERATE
+        assert loop._shutdown is False
