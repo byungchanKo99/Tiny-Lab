@@ -70,6 +70,8 @@ Read these files and build a mental model of the research so far:
 Also read the actual experiment script/code if it exists. Understanding what the code does
 helps you propose smarter experiments.
 
+- Pay special attention to LOSS and INVALID experiments. What patterns caused failures? Do NOT repeat them.
+
 STEP 2: DIAGNOSE THE RESEARCH STATE
 
 Based on your analysis, classify the current state:
@@ -125,11 +127,17 @@ You have FULL AUTHORITY to evolve the research. You MUST make bold, structural c
 ANTI-PATTERN: Generating 5 hypotheses that all tweak the same hyperparameter by small amounts.
 GOOD PATTERN: 1 ensemble hypothesis + 1 new model family + 1 feature engineering + 2 novel ideas.
 
-**If STUCK:**
-- Read research/loop.log for error details
-- Check if the experiment command is working
-- Verify data files exist and are valid
-- Simplify: try a minimal experiment to confirm the pipeline works
+**If STUCK — systematic diagnosis protocol:**
+1. Read research/loop.log for the last 5 error details
+2. Identify the failure pattern:
+   - Commands failing to execute? → check exit codes, paths, dependencies
+   - Metric extraction failing? → check stdout format matches expected JSON
+   - All experiments losing? → the baseline may have shifted, or lever space is exhausted
+3. Based on diagnosis:
+   - Pipeline broken → try a minimal experiment (simplest lever value) to verify baseline
+   - Metric format changed → update the experiment script's output format
+   - Losing pattern → escalate to SATURATED and try a fundamentally different approach
+4. If 3+ experiments fail the same way, do NOT generate similar hypotheses
 
 STEP 4: GENERATE HYPOTHESES
 
@@ -164,12 +172,33 @@ After generating hypotheses, write a JSON summary file to research/.generate_sum
   "best_so_far": {{"experiment_id": "EXP-XXX", "metric_value": 123.4, "config": "brief description"}},
   "hypotheses_added": ["H-XX", "H-YY", ...],
   "changes_made": ["extended lever X space", "added new lever Y", ...],
+  "references": ["(optional) technique or paper that inspired these", "based on EXP-003 trend"],
   "experiments_analyzed": 10
 }}
 ```
 
+The 'references' field is optional — cite when a hypothesis is inspired by a technique, paper, or prior experiment.
+
 This file will be overwritten each generation cycle. The loop will archive it.
 Also log what you did and why to research/loop.log (append a summary line)."""
+
+
+def _format_failure_history(project_dir: Path, metric_name: str) -> str:
+    """Summarize LOSS/INVALID experiments for GENERATE prompt injection."""
+    from .ledger import load_ledger
+    ledger = load_ledger(project_dir)
+    failures = [r for r in ledger if r.get("class") in ("LOSS", "INVALID")]
+    if not failures:
+        return ""
+    recent = failures[-15:]
+    lines = ["FAILED APPROACHES (avoid repeating these):\n"]
+    for r in recent:
+        pm = r.get("primary_metric", {})
+        delta = pm.get("delta_pct", "?")
+        desc = r.get("question", "")[:80]
+        lines.append(f"  - {r['id']} [{r.get('class')}]: {r.get('changed_variable')}={r.get('value')} "
+                     f"(delta={delta}%) — {desc}")
+    return "\n".join(lines)
 
 
 def _format_history(entries: list[dict[str, Any]]) -> str:
@@ -188,6 +217,9 @@ def _format_history(entries: list[dict[str, Any]]) -> str:
             lines.append(f"    Reasoning: {reasoning}")
         if changes:
             lines.append(f"    Changes: {changes}")
+        refs = e.get("references", [])
+        if refs:
+            lines.append(f"    References: {', '.join(refs[:3])}")
     return "\n".join(lines)
 
 
@@ -226,14 +258,21 @@ def generate_hypotheses(project: dict[str, Any], project_dir: Path, provider: An
     if history_text:
         prompt = history_text + "\n\n" + prompt
 
+    # Inject failure history so AI avoids repeating failed approaches
+    failure_text = _format_failure_history(project_dir, project["metric"]["name"])
+    if failure_text:
+        prompt = failure_text + "\n\n" + prompt
+
     # Code-level escalation: force SATURATED if stuck in EXPLORING/REFINING
     forced = _check_escalation(history)
     if forced:
         escalation_msg = (
-            f"MANDATORY ESCALATION: Your last generation cycles were "
-            f"{[h.get('state') for h in history[-3:]]}. "
-            f"You MUST classify state as {forced} and make bold structural changes. "
-            f"Do NOT classify as EXPLORING or REFINING."
+            f"MANDATORY ESCALATION: Last cycles were {[h.get('state') for h in history[-3:]]}.\n"
+            f"You MUST classify as {forced} and take bold action:\n"
+            f"1. Review ALL failed experiments — what patterns caused LOSS/INVALID?\n"
+            f"2. Choose a fundamentally different approach (new algorithm, ensemble, feature engineering)\n"
+            f"3. Do NOT tweak the same levers as recent failures\n"
+            f"4. If levers are exhausted, ADD new levers to project.yaml"
         )
         prompt = escalation_msg + "\n\n" + prompt
 

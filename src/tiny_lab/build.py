@@ -69,6 +69,14 @@ def build_command_code(
 
     target_desc = "\n".join(f"- {f}" for f in target_files) if target_files else "- (determine from project context)"
 
+    immutable = project.get("immutable_files", [])
+    immutable_warning = ""
+    if immutable:
+        immutable_warning = "\n\nDO NOT MODIFY these files under any circumstances:\n" + "\n".join(f"- {f}" for f in immutable)
+        overlap = set(target_files) & set(immutable)
+        if overlap:
+            log(f"BUILD[code]: WARNING — target_files overlap with immutable_files: {overlap}")
+
     prompt = f"""You are the code modifier for the research loop.
 
 PROJECT: {project['name']}
@@ -78,7 +86,7 @@ HYPOTHESIS: {hypothesis['description']}
 LEVER: {hypothesis['lever']} = {hypothesis['value']}
 
 TARGET FILES:
-{target_desc}
+{target_desc}{immutable_warning}
 
 TASK:
 Modify the target files to implement this hypothesis.

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from tiny_lab.build import build_command_flag, build_command_script, dispatch_build
+from tiny_lab.build import build_command_flag, build_command_code, build_command_script, dispatch_build
 from tiny_lab.errors import BuildError
 
 
@@ -99,3 +99,54 @@ class TestDispatchBuild:
         project["build"]["scripts"] = {"lr:0.05": "special.sh"}
         hyp = {"id": "H-1", "lever": "lr", "value": "0.05", "description": "test"}
         assert dispatch_build(project, hyp, None) == "special.sh"
+
+
+class TestImmutableFilesPrompt:
+    """F1: immutable_files warning injected into code build prompt."""
+
+    def test_immutable_warning_in_prompt(self):
+        """Verify immutable files appear as DO NOT MODIFY in the prompt."""
+        from unittest.mock import MagicMock
+        from pathlib import Path
+
+        project = _project("code")
+        project["description"] = "test project"
+        project["build"]["target_files"] = ["train.py"]
+        project["immutable_files"] = ["eval.py", "data/test.csv"]
+
+        provider = MagicMock()
+        provider.name = "mock"
+        result_mock = MagicMock()
+        result_mock.returncode = 0
+        result_mock.stderr = ""
+        provider.run.return_value = result_mock
+
+        hyp = {"id": "H-1", "lever": "lr", "value": "0.05", "description": "test"}
+        build_command_code(project, hyp, Path("/tmp/test"), provider)
+
+        prompt = provider.run.call_args[0][0]
+        assert "DO NOT MODIFY" in prompt
+        assert "eval.py" in prompt
+        assert "data/test.csv" in prompt
+
+    def test_no_warning_without_immutable(self):
+        """No warning when immutable_files is not set."""
+        from unittest.mock import MagicMock
+        from pathlib import Path
+
+        project = _project("code")
+        project["description"] = "test project"
+        project["build"]["target_files"] = ["train.py"]
+
+        provider = MagicMock()
+        provider.name = "mock"
+        result_mock = MagicMock()
+        result_mock.returncode = 0
+        result_mock.stderr = ""
+        provider.run.return_value = result_mock
+
+        hyp = {"id": "H-1", "lever": "lr", "value": "0.05", "description": "test"}
+        build_command_code(project, hyp, Path("/tmp/test"), provider)
+
+        prompt = provider.run.call_args[0][0]
+        assert "DO NOT MODIFY" not in prompt

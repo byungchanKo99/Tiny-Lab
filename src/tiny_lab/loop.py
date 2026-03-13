@@ -302,12 +302,38 @@ class ResearchLoop:
                     "config": f"{changed_var}={value}",
                 })
 
+        try:
+            self._write_experiment_report(entry)
+        except Exception:
+            log(f"RECORD: warning — could not write report for {ctx.exp_id}")
+
         self._mark_hypothesis(ctx.hypothesis, "done")
         log(f"RECORD: {ctx.exp_id} recorded as {ctx.verdict}")
 
         ctx.reset_experiment()
         self._sleep(CYCLE_SLEEP)
         return State.CHECK_QUEUE
+
+    def _write_experiment_report(self, entry: dict[str, Any]) -> None:
+        """Auto-generate per-experiment markdown report."""
+        from .paths import reports_dir
+        rdir = reports_dir(self.project_dir)
+        rdir.mkdir(exist_ok=True)
+        exp_id = entry["id"]
+        pm = entry.get("primary_metric", {})
+        metric_name = next((k for k in pm if k not in ("baseline", "delta_pct")), "?")
+        report = (
+            f"# {exp_id}\n\n"
+            f"## Hypothesis\n{entry.get('question', 'N/A')}\n\n"
+            f"## Setup\n- Lever: {entry.get('changed_variable', 'N/A')}\n"
+            f"- Value: {entry.get('value', 'N/A')}\n\n"
+            f"## Result\n- Verdict: **{entry.get('class', 'N/A')}**\n"
+            f"- {metric_name}: {pm.get(metric_name, 'N/A')}\n"
+            f"- Baseline: {pm.get('baseline', 'N/A')}\n"
+            f"- Delta: {pm.get('delta_pct', 'N/A')}%\n\n"
+            f"## Notes\n{entry.get('notes', 'N/A')}\n"
+        )
+        (rdir / f"{exp_id}.md").write_text(report)
 
     # ------------------------------------------------------------------
     # Main loop

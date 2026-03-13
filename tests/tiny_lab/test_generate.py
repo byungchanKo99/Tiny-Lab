@@ -1,7 +1,10 @@
 """Tests for generate history injection and escalation logic."""
 from __future__ import annotations
 
-from tiny_lab.generate import _format_history, _check_escalation
+import json
+from pathlib import Path
+
+from tiny_lab.generate import _format_history, _format_failure_history, _check_escalation
 
 
 class TestFormatHistory:
@@ -28,6 +31,64 @@ class TestFormatHistory:
         # Reasoning truncated to 120 chars
         assert "x" * 120 in result
         assert "x" * 121 not in result
+
+
+    def test_references_in_history(self):
+        entries = [
+            {"state": "EXPLORING", "reasoning": "Trying", "hypotheses_added_count": 1,
+             "changes_made": [], "references": ["paper-X", "EXP-003 trend"]},
+        ]
+        result = _format_history(entries)
+        assert "References: paper-X, EXP-003 trend" in result
+
+
+class TestFormatFailureHistory:
+    def test_empty_ledger(self, tmp_path):
+        (tmp_path / "research").mkdir()
+        (tmp_path / "research" / "ledger.jsonl").write_text("")
+        assert _format_failure_history(tmp_path, "loss") == ""
+
+    def test_no_failures(self, tmp_path):
+        (tmp_path / "research").mkdir()
+        entry = {"id": "EXP-002", "class": "WIN", "question": "test", "changed_variable": "lr",
+                 "value": "0.05", "primary_metric": {"loss": 0.5, "baseline": 0.6, "delta_pct": -16.7},
+                 "family": "t", "status": "done", "decision": "win"}
+        (tmp_path / "research" / "ledger.jsonl").write_text(json.dumps(entry) + "\n")
+        assert _format_failure_history(tmp_path, "loss") == ""
+
+    def test_formats_failures(self, tmp_path):
+        (tmp_path / "research").mkdir()
+        entries = []
+        for i, cls in enumerate(["LOSS", "INVALID", "WIN"]):
+            entries.append(json.dumps({
+                "id": f"EXP-{i:03d}", "class": cls, "question": f"test {cls}",
+                "changed_variable": "lr", "value": f"0.{i}",
+                "primary_metric": {"loss": 0.5 + i * 0.1, "baseline": 0.6, "delta_pct": -10 + i * 5},
+                "family": "t", "status": "done", "decision": cls.lower(),
+            }))
+        (tmp_path / "research" / "ledger.jsonl").write_text("\n".join(entries) + "\n")
+        result = _format_failure_history(tmp_path, "loss")
+        assert "FAILED APPROACHES" in result
+        assert "EXP-000 [LOSS]" in result
+        assert "EXP-001 [INVALID]" in result
+        assert "EXP-002" not in result  # WIN should not appear
+
+    def test_limits_to_15(self, tmp_path):
+        (tmp_path / "research").mkdir()
+        entries = []
+        for i in range(20):
+            entries.append(json.dumps({
+                "id": f"EXP-{i:03d}", "class": "LOSS", "question": f"test {i}",
+                "changed_variable": "lr", "value": f"0.{i}",
+                "primary_metric": {"loss": 0.5, "baseline": 0.6, "delta_pct": -10},
+                "family": "t", "status": "done", "decision": "loss",
+            }))
+        (tmp_path / "research" / "ledger.jsonl").write_text("\n".join(entries) + "\n")
+        result = _format_failure_history(tmp_path, "loss")
+        # Should show last 15, not first 15
+        assert "EXP-005" in result
+        assert "EXP-019" in result
+        assert "EXP-004" not in result
 
 
 class TestCheckEscalation:

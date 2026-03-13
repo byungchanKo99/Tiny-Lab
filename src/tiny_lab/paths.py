@@ -44,5 +44,9 @@ def generate_history_path(project_dir: Path) -> Path:
     return research_dir(project_dir) / ".generate_history.jsonl"
 
 
+def reports_dir(project_dir: Path) -> Path:
+    return research_dir(project_dir) / "reports"
+
+
 def eval_result_path(project_dir: Path, exp_id: str) -> Path:
     return research_dir(project_dir) / f".eval_result_{exp_id}.json"

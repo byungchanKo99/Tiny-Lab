@@ -55,6 +55,7 @@ PROJECT_CONFIG = {
     "optional": {
         "description": str, "build": dict, "run": dict, "evaluate": dict,
         "lane": str, "workdir": str, "calibration": dict, "rules": list,
+        "immutable_files": list,
     },
 }
 

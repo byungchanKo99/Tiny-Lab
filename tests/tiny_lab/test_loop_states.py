@@ -322,3 +322,55 @@ class TestCircuitBreakerWarning:
         warning_events = [e for e in events if e["event"] == "circuit_breaker_warning"]
         assert len(warning_events) == 1
         assert warning_events[0]["data"]["invalid_count"] == 4
+
+
+class TestExperimentReports:
+    """F5: Auto-generated per-experiment markdown reports."""
+
+    def test_report_written_on_record(self, loop: ResearchLoop, project_dir: Path):
+        baseline = {
+            "id": "EXP-001", "question": "baseline", "family": "test",
+            "changed_variable": "baseline", "value": "baseline", "control": "EXP-001",
+            "status": "done", "class": "BASELINE",
+            "primary_metric": {"loss": 1.0, "baseline": 1.0, "delta_pct": 0.0},
+            "decision": "baseline",
+        }
+        (project_dir / "research" / "ledger.jsonl").write_text(json.dumps(baseline) + "\n")
+        _add_hypotheses(project_dir, [{"id": "H-1", "status": "running", "lever": "lr", "value": "0.05", "description": "test lr"}])
+
+        project = _load_project(project_dir)
+        ctx = CycleContext(
+            hypothesis={"id": "H-1", "lever": "lr", "value": "0.05", "description": "test lr"},
+            command="echo test", exp_id="EXP-002", new_metric=0.5, verdict="WIN",
+        )
+        with patch.object(loop, "_sleep"):
+            loop._handle_record(ctx, project)
+
+        report_path = project_dir / "research" / "reports" / "EXP-002.md"
+        assert report_path.exists()
+        content = report_path.read_text()
+        assert "# EXP-002" in content
+        assert "test lr" in content
+        assert "**WIN**" in content
+        assert "Lever: lr" in content
+
+    def test_report_failure_does_not_crash(self, loop: ResearchLoop, project_dir: Path):
+        """Report write failure should not break the record handler."""
+        baseline = {
+            "id": "EXP-001", "question": "baseline", "family": "test",
+            "changed_variable": "baseline", "value": "baseline", "control": "EXP-001",
+            "status": "done", "class": "BASELINE",
+            "primary_metric": {"loss": 1.0, "baseline": 1.0, "delta_pct": 0.0},
+            "decision": "baseline",
+        }
+        (project_dir / "research" / "ledger.jsonl").write_text(json.dumps(baseline) + "\n")
+        _add_hypotheses(project_dir, [{"id": "H-1", "status": "running", "lever": "lr", "value": "0.05", "description": "test"}])
+
+        project = _load_project(project_dir)
+        ctx = CycleContext(
+            hypothesis={"id": "H-1", "lever": "lr", "value": "0.05", "description": "test"},
+            command="echo test", exp_id="EXP-002", new_metric=0.5, verdict="WIN",
+        )
+        with patch.object(loop, "_write_experiment_report", side_effect=OSError("disk full")):
+            with patch.object(loop, "_sleep"):
+                loop._handle_record(ctx, project)  # should not raise

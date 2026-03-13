@@ -27,7 +27,8 @@ def run_experiment_surface(
     args = [sys.executable, str(surface_path), "run", lane, command, "--name", exp_id]
     if eval_cmd:
         args += ["--eval-on-checkpoint", eval_cmd]
-    max_seconds = project.get("calibration", {}).get("max_total_seconds")
+    max_seconds = (project.get("calibration", {}).get("max_total_seconds")
+                   or project.get("run", {}).get("timeout"))
     env = make_env(project_dir)
     return subprocess.run(
         args, text=True, capture_output=True, env=env,
@@ -44,7 +45,8 @@ def run_experiment_command(
     """Direct subprocess execution without surface."""
     workdir = project.get("workdir", ".")
     workdir_path = project_dir / workdir
-    max_seconds = project.get("calibration", {}).get("max_total_seconds")
+    max_seconds = (project.get("calibration", {}).get("max_total_seconds")
+                   or project.get("run", {}).get("timeout"))
     env = make_env(project_dir, exp_id)
     return subprocess.run(
         command, shell=True, text=True, capture_output=True,

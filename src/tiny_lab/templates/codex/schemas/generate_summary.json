@@ -9,7 +9,7 @@
     "changes_made",
     "experiments_analyzed"
   ],
-  "additionalProperties": false,
+  "additionalProperties": true,
   "properties": {
     "state": {
       "type": "string",
@@ -46,6 +46,11 @@
     "experiments_analyzed": {
       "type": "integer",
       "description": "Number of past experiments reviewed"
+    },
+    "references": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Papers, techniques, or prior experiments that inspired these hypotheses"
     }
   }
 }
