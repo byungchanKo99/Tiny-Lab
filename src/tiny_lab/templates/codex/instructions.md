@@ -77,6 +77,22 @@ The loop is designed to run indefinitely. **You must NEVER:**
 
 **If you think experiments are "enough"** — you're wrong. Let the loop continue.
 
+## GENERATE Phase: Output Schema
+
+When the loop triggers you to generate hypotheses, write `research/.generate_summary.json` with these fields:
+
+| Field                  | Required    | Type     | Notes                                                                   |
+| ---------------------- | ----------- | -------- | ----------------------------------------------------------------------- |
+| `state`                | ✅          | string   | `EXPLORING` / `REFINING` / `SATURATED` / `STUCK`                        |
+| `reasoning`            | ✅          | string   | 2–3 sentences on diagnosis and choices                                  |
+| `best_so_far`          | ✅          | object   | `{experiment_id, metric_value, config}`                                 |
+| `hypotheses_added`     | ✅          | string[] | IDs added (e.g. `["H-006", "H-007"]`)                                   |
+| `changes_made`         | ✅          | string[] | Changes to project.yaml or code                                         |
+| `experiments_analyzed` | ✅          | integer  | Number of past experiments reviewed                                     |
+| `references`           | ⬜ optional | string[] | Techniques, papers, or prior experiments that inspired these hypotheses |
+
+`references` is optional — include it only when a hypothesis is directly inspired by a known technique or prior experiment.
+
 ## Important
 
 - **Do not modify `research/ledger.jsonl`** — append-only source of truth
