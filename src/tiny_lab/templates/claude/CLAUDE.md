@@ -19,16 +19,30 @@ You are not just a tool executor. You are the **research supervisor**. Your job:
 **You MUST run it in the background.** If you run it in the foreground, your session will be blocked forever waiting for a command that never exits.
 
 ```bash
-# CORRECT — run in background, then monitor
-tiny-lab run &
+# CORRECT — run in background with output capture, then monitor
+CYCLE_SLEEP=1 tiny-lab run > research/tiny_lab_run.out 2>&1 &
+echo "Loop started (pid=$!)"
 tiny-lab status       # check if it's alive
 tiny-lab board        # check experiment results
 
-# WRONG — this blocks forever, you lose control
+# WRONG — this blocks forever (infinite loop), you lose control
 tiny-lab run
 ```
 
 **Stop it with:** `tiny-lab stop` (sends SIGTERM to the loop process)
+
+### ABSOLUTE RULE: NEVER STOP THE LOOP YOURSELF
+
+The loop is designed to run indefinitely. **You must NEVER:**
+
+- Run `tiny-lab stop` unless the user explicitly asks you to stop it
+- Run `kill`, `kill -9`, `kill -KILL`, or any signal to the loop process
+- Consider the loop "done" and clean it up
+- Stop the loop because you're about to give your final answer
+
+**The loop keeps running even after you respond.** When you summarize results and the user doesn't give further instructions, the loop still runs in the background. That's correct behavior. The loop will autonomously generate new hypotheses, try new approaches, and keep improving — this is the whole point.
+
+**If you think experiments are "enough"** — you're wrong. The GENERATE phase will try ensembles, new models, feature engineering, and other strategies you haven't considered. Let it run.
 
 ### Monitoring Checklist — DO NOT STOP AFTER INITIAL HYPOTHESES
 
@@ -55,6 +69,23 @@ tiny-lab board     # How are experiments going? WIN/LOSS ratio?
 | All experiments are WIN             | Search space is too conservative         | Extend the space with more aggressive values                              |
 | Initial queue exhausted             | Loop enters GENERATE phase               | **Keep monitoring** — new experiments are being created automatically     |
 
+### Monitoring Loop Pattern
+
+After `tiny-lab run &`, use this exact pattern:
+
+1. Wait 30s for bootstrap
+2. `tiny-lab status` — confirm RUNNING
+3. `tiny-lab board` — check initial results
+4. Every 2-5 minutes: repeat status + board
+5. When queue empties → loop enters GENERATE → **keep monitoring**
+6. Only stop monitoring when:
+   - User explicitly says to stop
+   - Loop stops on its own (circuit breaker or errors)
+   - User returns and you summarize results
+
+NEVER run `tiny-lab run` without `&` (background). NEVER consider the task
+done just because initial hypotheses finished.
+
 ### When User Returns
 
 Summarize **ALL** research (not just your initial hypotheses):
@@ -64,6 +95,76 @@ Summarize **ALL** research (not just your initial hypotheses):
 - What directions were explored (initial approach + what the loop discovered)
 - Whether the loop is still running
 - Recommended next steps (continue? stop? change direction?)
+
+## `tiny-lab` CLI Reference
+
+`tiny-lab` is the CLI that drives the entire research loop. You can use it directly — the `/research` command is just a convenience wrapper.
+
+### Core Commands
+
+| Command             | What it does                            | Notes                                                            |
+| ------------------- | --------------------------------------- | ---------------------------------------------------------------- |
+| `tiny-lab init`     | Initialize research directory structure | Creates `research/` dir, config templates. Run once per project. |
+| `tiny-lab run`      | Start the experiment loop               | **INFINITE LOOP** — always run in background (see below)         |
+| `tiny-lab stop`     | Gracefully stop a running loop          | Sends SIGTERM. Safe to call anytime.                             |
+| `tiny-lab status`   | Show loop state (RUNNING/STOPPED/etc.)  | Use to confirm loop is alive after starting                      |
+| `tiny-lab board`    | Show experiment results dashboard       | WIN/LOSS/INVALID table. Primary way to check progress.           |
+| `tiny-lab generate` | Generate new hypotheses via AI          | Normally called automatically by the loop when queue empties     |
+
+### How to Start the Loop (MANDATORY PATTERN)
+
+```bash
+# 1. Start in background with output capture
+CYCLE_SLEEP=1 tiny-lab run > research/tiny_lab_run.out 2>&1 &
+echo "Loop started (pid=$!)"
+
+# 2. Confirm it's alive (wait ~30s first)
+tiny-lab status
+
+# 3. Check progress
+tiny-lab board
+```
+
+- `CYCLE_SLEEP=1` — reduces inter-cycle delay for faster iteration
+- Output goes to `research/tiny_lab_run.out` — check with `tail research/tiny_lab_run.out` if something seems off
+- **NEVER run `tiny-lab run` in foreground** — it's an infinite loop and will block your session permanently
+
+### How to Stop
+
+```bash
+tiny-lab stop          # graceful shutdown
+# or check if it's already stopped:
+tiny-lab status
+```
+
+### How to Debug Issues
+
+```bash
+tail -50 research/loop.log              # recent loop activity
+tail -20 research/tiny_lab_run.out      # stdout/stderr from the process
+cat research/ledger.jsonl | tail -5     # last 5 experiment results
+tiny-lab board                          # visual overview
+```
+
+### Loop Lifecycle
+
+```
+tiny-lab run &
+    │
+    ├─ Picks pending hypothesis from queue
+    ├─ Runs experiment (baseline command + lever changes)
+    ├─ Records result to ledger.jsonl
+    ├─ Picks next hypothesis...
+    │
+    ├─ Queue empty → enters GENERATE phase
+    │   └─ AI generates new hypotheses based on results so far
+    │   └─ New hypotheses added to queue → loop continues
+    │
+    ├─ Circuit breaker: 5 INVALID in last 20 → loop stops
+    └─ tiny-lab stop → graceful shutdown
+```
+
+The loop **never exits on its own** unless the circuit breaker triggers or an unrecoverable error occurs. This is by design — it continuously explores the search space.
 
 ## Quick Start
 
@@ -77,17 +178,21 @@ Summarize **ALL** research (not just your initial hypotheses):
 
 The discovery flow will analyze your data, propose metrics/levers, and set up everything.
 
-**Manage existing research:**
+**Or set up manually and run directly:**
 
 ```bash
-tiny-lab status          # Check current loop state
-tiny-lab run &           # Start the research loop IN BACKGROUND (runs forever!)
-tiny-lab stop            # Stop a running loop
-tiny-lab board           # Show experiment results dashboard
-tiny-lab generate        # Generate new hypotheses via AI
-```
+# 1. Initialize
+tiny-lab init
 
-Or use `/research start|status|stop|generate|board` inside Claude Code.
+# 2. Edit research/project.yaml — set baseline, metric, levers
+# 3. Add hypotheses to research/hypothesis_queue.yaml (or use tiny-lab generate)
+
+# 4. Start the loop
+CYCLE_SLEEP=1 tiny-lab run > research/tiny_lab_run.out 2>&1 &
+
+# 5. Monitor
+tiny-lab status && tiny-lab board
+```
 
 ## Workflow
 
@@ -95,7 +200,8 @@ Or use `/research start|status|stop|generate|board` inside Claude Code.
 
 1. Edit `research/project.yaml` — set baseline command, metric name, levers with search spaces
 2. Add hypotheses to `research/hypothesis_queue.yaml` (or run `tiny-lab generate`)
-3. Run `tiny-lab run &` in the background — the loop picks hypotheses, runs experiments, and records results **indefinitely**
+3. Start the loop: `CYCLE_SLEEP=1 tiny-lab run > research/tiny_lab_run.out 2>&1 &`
+4. Monitor: `tiny-lab status` then `tiny-lab board` — repeat every 2-5 minutes
 
 ### Checking Results
 

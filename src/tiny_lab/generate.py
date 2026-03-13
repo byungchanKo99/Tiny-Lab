@@ -97,9 +97,11 @@ STEP 2: DIAGNOSE THE RESEARCH STATE
 Based on your analysis, classify the current state:
 
 A. **EXPLORING** — untried values remain in current levers → generate hypotheses from untried values.
-B. **REFINING** — best region found, need finer granularity → add intermediate values around the best result.
-C. **SATURATED** — current levers fully explored, diminishing returns → time to evolve.
+B. **REFINING** — best region found, need finer granularity → add intermediate values around the best result. Keep this phase SHORT (1-2 cycles max). If refinement yields <1% improvement, escalate to SATURATED.
+C. **SATURATED** — current levers explored OR refinement stalled → time for a MAJOR strategic shift. This is the most important state — see below.
 D. **STUCK** — many INVALID/LOSS, something is fundamentally wrong → diagnose and fix.
+
+IMPORTANT: Do NOT stay in EXPLORING/REFINING forever. If the last 2+ generation cycles have been EXPLORING or REFINING within the same lever set, you MUST escalate to SATURATED and try something fundamentally different.
 
 STEP 3: ACT BASED ON STATE
 
@@ -113,28 +115,37 @@ STEP 3: ACT BASED ON STATE
 - Example: best was rate=1.1, space was [0.8, 0.9, 1.0, 1.1, 1.2] → add [1.05, 1.15, 1.25]
 
 **If SATURATED — this is where you earn your keep:**
-You have FULL AUTHORITY to evolve the research. Do any of the following:
+You have FULL AUTHORITY to evolve the research. You MUST make bold, structural changes — not just tweak hyperparameters. Do at least 2 of the following per SATURATED cycle:
 
-1. **Add new levers** — read the experiment script, find parameters not yet experimented with.
-   Add them to research/project.yaml with a reasonable search space.
+1. **Try fundamentally different models/algorithms** — don't just tune within one model family.
+   If you've been tuning CatBoost, try neural nets, SVMs, or a completely different paradigm.
+   If you've been doing gradient boosting, try stacking/blending the top performers.
 
-2. **Change the approach** — if flag-based experiments plateau, consider:
-   - Feature engineering: create new input features from existing data
-   - Algorithm change: try a different model/method entirely
-   - Ensemble: combine the best configurations
-   - Preprocessing: normalize, scale, handle outliers differently
+2. **Ensemble the best configurations** — take the top 3-5 performing configs and combine them.
+   Implement voting, stacking, or weighted averaging. This often beats any single model.
+   Modify the experiment script to support ensemble mode if needed.
 
-3. **Modify the experiment code** — if build.type allows it, or if you can propose a code change:
-   - Write a new script variant
-   - Add a preprocessing step
-   - Implement an ensemble of the top-performing configurations
+3. **Feature engineering** — create interaction features, polynomial features, target encoding,
+   time-based features, or domain-specific transformations. Modify the experiment script.
 
-4. **Update research questions** — add new questions to research/questions.yaml
+4. **Change the approach entirely** — if flag-based experiments plateau:
+   - Switch build.type to "code" and let experiments modify the script directly
+   - Add preprocessing steps (scaling, outlier removal, feature selection)
+   - Try dimensionality reduction before modeling
+   - Implement cross-validation strategy changes
+
+5. **Add new levers** — read the experiment script, find parameters not yet experimented with.
+   Add them to research/project.yaml with an ambitious search space.
+
+6. **Update research questions** — add new questions to research/questions.yaml
    that reflect what you've learned and what's worth exploring next.
 
-5. **Change the baseline** — if experiments consistently beat the original baseline,
+7. **Raise the bar** — if experiments consistently beat the original baseline,
    update baseline.command in project.yaml to the best-known configuration.
-   Future experiments will be measured against this new bar.
+   Future experiments will be measured against this new, higher bar.
+
+ANTI-PATTERN: Generating 5 hypotheses that all tweak the same hyperparameter by small amounts.
+GOOD PATTERN: 1 ensemble hypothesis + 1 new model family + 1 feature engineering + 2 novel ideas.
 
 **If STUCK:**
 - Read research/loop.log for error details

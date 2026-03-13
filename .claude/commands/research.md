@@ -1,3 +1,7 @@
+---
+allowed-tools: Bash(tiny-lab *), Bash(CYCLE_SLEEP*), Bash(cat research/*), Bash(tail *), Read, Write, Edit, Glob, Grep
+---
+
 # /research — Research Loop Control & Discovery
 
 Manage the deterministic research loop for the current project, or start a new research from scratch.
@@ -19,13 +23,22 @@ Parse `$ARGUMENTS` for the subcommand:
 
 ### `start`
 
-Start the research loop:
+Start the research loop **in the background**:
 
 ```bash
-tiny-lab run
+CYCLE_SLEEP=1 tiny-lab run > research/tiny_lab_run.out 2>&1 &
+echo "Loop started (pid=$!)"
 ```
 
-Report the PID and how to stop it.
+Report the PID and how to stop it (`tiny-lab stop`).
+
+**After starting, enter monitoring mode:**
+
+1. Wait 30-60 seconds for first experiments
+2. Run `tiny-lab status` to confirm the loop is alive
+3. Run `tiny-lab board` to check progress
+4. Keep checking every 2-5 minutes until the user returns or the loop stops
+5. Do NOT consider the task "done" after initial hypotheses complete — the loop generates new ones automatically
 
 ### `status`
 
@@ -343,5 +356,5 @@ Start the research loop? (tiny-lab run)
 
 **Branching:**
 
-- User approves → update state file to `phase: DONE` → run `tiny-lab run`, report PID
+- User approves → update state file to `phase: DONE` → run `CYCLE_SLEEP=1 tiny-lab run > research/tiny_lab_run.out 2>&1 &`, report PID, then enter monitoring mode (see `start` section)
 - User wants changes → update state file back to the relevant phase → revisit that phase

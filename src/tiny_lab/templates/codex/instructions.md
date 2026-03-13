@@ -68,8 +68,21 @@ tiny-lab generate        # Generate new hypotheses
 | `research/ledger.jsonl`          | Experiment results | No (append-only)    |
 | `research/loop.log`              | Loop execution log | No                  |
 
+## ABSOLUTE RULE: NEVER STOP THE LOOP YOURSELF
+
+The loop is designed to run indefinitely. **You must NEVER:**
+
+- Run `tiny-lab stop` unless the user explicitly asks you to stop it
+- Run `kill`, `kill -9`, `kill -KILL`, or any signal to the loop process
+- Consider the loop "done" and clean it up
+- Stop the loop because you're about to give your final answer or summary
+
+**The loop keeps running even after you respond.** When you summarize results, the loop still runs in the background. That's correct behavior. The GENERATE phase will autonomously try ensembles, new models, feature engineering, and other strategies. Let it run.
+
+**If you think experiments are "enough"** — you're wrong. Let the loop continue.
+
 ## Important
 
 - **Do not modify `research/ledger.jsonl`** — append-only source of truth
-- **Do not kill the loop process** — use `tiny-lab stop`
+- **Do not kill the loop process** — use `tiny-lab stop` only when user asks
 - The circuit breaker stops after 5 INVALID in last 20 experiments
