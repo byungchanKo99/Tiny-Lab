@@ -4,7 +4,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from tiny_lab.generate import _format_history, _format_failure_history, _check_escalation
+import yaml
+
+from tiny_lab.generate import _format_history, _format_failure_history, _check_escalation, _validate_new_entries
 
 
 class TestFormatHistory:
@@ -147,3 +149,47 @@ class TestCheckEscalation:
         ]
         # Last 3: SATURATED, SATURATED, EXPLORING → only 1 non-saturated → no escalation
         assert _check_escalation(history) is None
+
+
+class TestValidateNewEntries:
+    def test_generated_at_auto_inserted(self, tmp_path):
+        """New entries get generated_at timestamp automatically."""
+        research = tmp_path / "research"
+        research.mkdir()
+        before = [
+            {"id": "H-1", "status": "done", "lever": "lr", "value": "0.01", "description": "old"},
+        ]
+        after = before + [
+            {"id": "H-2", "status": "pending", "lever": "lr", "value": "0.05", "description": "new"},
+        ]
+        (research / "hypothesis_queue.yaml").write_text(yaml.dump({"hypotheses": after}))
+        valid = _validate_new_entries(before, after, tmp_path)
+        assert valid == 1
+        # Check generated_at was inserted into the entry
+        assert "generated_at" in after[1]
+
+    def test_generated_at_not_overwritten(self, tmp_path):
+        """Existing generated_at is preserved."""
+        research = tmp_path / "research"
+        research.mkdir()
+        before = []
+        after = [
+            {"id": "H-1", "status": "pending", "lever": "lr", "value": "0.01",
+             "description": "test", "generated_at": "2025-01-01T00:00:00+00:00"},
+        ]
+        (research / "hypothesis_queue.yaml").write_text(yaml.dump({"hypotheses": after}))
+        _validate_new_entries(before, after, tmp_path)
+        assert after[0]["generated_at"] == "2025-01-01T00:00:00+00:00"
+
+    def test_hypothesis_with_reasoning_validates(self, tmp_path):
+        """Hypothesis with reasoning field passes validation."""
+        research = tmp_path / "research"
+        research.mkdir()
+        before = []
+        after = [
+            {"id": "H-1", "status": "pending", "lever": "lr", "value": "0.05",
+             "description": "lower lr", "reasoning": "LR 0.01 won — try lower"},
+        ]
+        (research / "hypothesis_queue.yaml").write_text(yaml.dump({"hypotheses": after}))
+        valid = _validate_new_entries(before, after, tmp_path)
+        assert valid == 1

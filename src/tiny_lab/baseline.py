@@ -65,6 +65,7 @@ def ensure_baseline(project: dict[str, Any], project_dir: Path) -> bool:
         },
         "decision": "baseline",
         "notes": f"Command: {baseline_cmd}",
+        "config": {"baseline_command": baseline_cmd},
     }
     append_ledger(project_dir, entry)
     log(f"BASELINE: recorded {metric_name}={metric_val}")

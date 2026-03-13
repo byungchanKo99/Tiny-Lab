@@ -46,6 +46,11 @@
     "experiments_analyzed": {
       "type": "integer",
       "description": "Number of past experiments reviewed"
+    },
+    "references": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Techniques, papers, or prior experiments that inspired this generation cycle"
     }
   }
 }
