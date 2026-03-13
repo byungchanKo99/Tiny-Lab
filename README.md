@@ -54,7 +54,7 @@ Both modes **must** run in background (`&`). Infinite mode never exits on its ow
 
 1. **Pick** a hypothesis from the queue
 2. **Build** the experiment command (replace CLI flags, modify code, or run a script)
-3. **Run** the experiment (shell, surface control plane, or multi-step pipeline)
+3. **Run** the experiment (shell command or multi-step pipeline)
 4. **Evaluate** the result (parse stdout JSON, run eval script, or AI scoring)
 5. **Record** WIN / LOSS / INVALID to the append-only ledger
 6. **Repeat** — in infinite mode, GENERATE creates new hypotheses when the queue empties
@@ -132,7 +132,6 @@ Your experiment script must print the metric as JSON to stdout:
 | BUILD    | `script`      | Use predefined script per lever:value                         | No        |
 | BUILD    | `code`        | AI modifies source code via sub-agent                         | Yes       |
 | RUN      | `command`     | Direct shell execution                                        | No        |
-| RUN      | `surface`     | Via surface control plane (v1)                                | No        |
 | RUN      | `pipeline`    | Multi-step workflow with background processes                 | No        |
 | EVALUATE | `stdout_json` | Parse metric from last JSON object in stdout                  | No        |
 | EVALUATE | `script`      | Run separate eval script (supports retries)                   | No        |
@@ -189,10 +188,6 @@ pytest tests/tiny_lab/
 ```
 
 193 tests across 12 test files covering state machine transitions, plugin dispatch, schema migration, event system, multi-lever experiments, error recovery, and circuit breaker.
-
-## Legacy
-
-This repo also contains the original `bin/surface` control plane and `examples/mlx/` trainer from the 1.0 release. See `bin/surface --help` for the original experiment tooling.
 
 ## Credits
 

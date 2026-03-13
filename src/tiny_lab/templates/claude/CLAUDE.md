@@ -222,7 +222,7 @@ The `research/project.yaml` file controls the experiment. Key sections:
 - **metric.direction** — `minimize` or `maximize`
 - **levers** — each lever has a `flag`, `baseline` value, and `space` of values to try
 - **build.type** — `flag` (replace CLI flags), `script` (predefined scripts), `code` (AI modifies source)
-- **run.type** — `surface` (via surface tool), `command` (direct shell), `pipeline` (multi-step)
+- **run.type** — `command` (direct shell), `pipeline` (multi-step)
 - **evaluate.type** — `stdout_json` (parse stdout), `script` (run eval script), `llm` (AI scoring)
 
 ## File Structure

@@ -241,7 +241,7 @@ Which metric do you want to optimize? Are these the right levers?
 | 3   | `metric.name` + `metric.direction`              | From ANALYZE metric candidates + user choice. Direction: "accuracy"/"score"/"revenue" → maximize, "loss"/"error"/"cost" → minimize. |
 | 4   | `baseline.command`                              | From script analysis (flags + defaults). If no script → ask user.                                                                   |
 | 5   | `levers` (name, flag, baseline, space for each) | From ANALYZE lever candidates + script flags. Propose search spaces from data ranges.                                               |
-| 6   | `run.type`                                      | Default: `command`. Only ask if user mentioned surface/pipeline.                                                                    |
+| 6   | `run.type`                                      | Default: `command`. Only ask if user mentioned pipeline.                                                                            |
 | 7   | `evaluate.type`                                 | Default: `stdout_json`. Only ask if output isn't JSON (e.g., screenshots → `llm`).                                                  |
 
 **Actions:**
@@ -284,7 +284,7 @@ Which metric do you want to optimize? Are these the right levers?
      type: { flag|script|code }
 
    run:
-     type: { command|surface|pipeline }
+     type: { command|pipeline }
 
    evaluate:
      type: { stdout_json|script|llm }

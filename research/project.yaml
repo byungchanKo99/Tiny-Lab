@@ -1,54 +1,28 @@
-name: mlx-tiny-lm
-description: "Tiny language model experiments on Apple Silicon with MLX"
+name: example
+description: "Example project — replace with your own experiment"
 
-lane: tiny-gpu
-workdir: examples/mlx
-
-# Plugin types: build.type (flag|script|code), run.type (surface|command|pipeline), evaluate.type (stdout_json|script|llm)
 build:
   type: flag
 
 run:
-  type: surface
+  type: command
 
 evaluate:
   type: stdout_json
 
 baseline:
-  command: >-
-    python3 train.py --steps 120 --eval-every 20
-    --save-every 20 --checkpoint-out tiny_weights.bin
-    --learning-rate 0.02 --dim 64 --batch-size 128
-  eval_command: ane/eval_tiny.py
+  command: 'echo ''{"metric": 1.0}'''
 
 metric:
-  name: best_val_bpb
-  source: stdout_json
+  name: metric
   direction: minimize
 
 levers:
-  learning_rate:
-    flag: "--learning-rate"
-    baseline: 0.02
-    space: [0.01, 0.02, 0.03]
-  dim:
-    flag: "--dim"
-    baseline: 64
-    space: [32, 64, 96]
-  batch_size:
-    flag: "--batch-size"
-    baseline: 128
-    space: [64, 128, 256]
-  steps:
-    flag: "--steps"
-    baseline: 120
-    space: [60, 120, 200]
-
-calibration:
-  wall_clock_minutes: 5
-  max_total_seconds: 330
+  example_lever:
+    flag: "--example"
+    baseline: 1.0
+    space: [0.5, 1.0, 1.5, 2.0]
 
 rules:
   - "Change command-line flags only"
   - "Do not install packages"
-  - "INVALID is not LOSS"
