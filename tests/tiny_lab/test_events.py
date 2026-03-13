@@ -1,4 +1,4 @@
-"""Tests for event system and action_needed logic."""
+"""Tests for event system (observability logging)."""
 from __future__ import annotations
 
 import json
@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tiny_lab.events import EventType, emit_event, load_events, compute_action_needed
+from tiny_lab.events import EventType, emit_event, load_events
 
 
 @pytest.fixture()
@@ -38,7 +38,6 @@ class TestEmitEvent:
 
     def test_failure_safe(self, project_dir: Path):
         """Event failure must not raise."""
-        # Make research dir read-only to force write failure
         events_path = project_dir / "research" / ".events.jsonl"
         events_path.write_text("")
         events_path.chmod(0o000)
@@ -74,49 +73,3 @@ class TestLoadEvents:
         events = load_events(project_dir, last_n=3)
         assert len(events) == 3
         assert events[0]["data"]["exp_id"] == "EXP-7"
-
-
-class TestComputeActionNeeded:
-    def test_new_best(self):
-        events = [{"event": "new_best", "data": {"exp_id": "EXP-010", "metric_value": 0.95}}]
-        needed, reasons = compute_action_needed(True, events, [], {})
-        assert needed
-        assert any("New best" in r for r in reasons)
-
-    def test_circuit_breaker(self):
-        events = [{"event": "circuit_breaker_warning", "data": {"invalid_count": 4, "threshold": 5}}]
-        needed, reasons = compute_action_needed(True, events, [], {})
-        assert needed
-        assert any("Circuit breaker" in r for r in reasons)
-
-    def test_consecutive_failures(self):
-        ledger = [
-            {"class": "LOSS"},
-            {"class": "LOSS"},
-            {"class": "INVALID"},
-        ]
-        needed, reasons = compute_action_needed(True, [], ledger, {})
-        assert needed
-        assert any("Consecutive failures" in r for r in reasons)
-
-    def test_loop_dead(self):
-        needed, reasons = compute_action_needed(False, [], [], {}, lock_exists=True)
-        assert needed
-        assert any("stopped unexpectedly" in r for r in reasons)
-
-    def test_queue_empty_while_running(self):
-        needed, reasons = compute_action_needed(True, [], [], {"done": 5})
-        assert needed
-        assert any("Queue empty" in r for r in reasons)
-
-    def test_all_clear(self):
-        ledger = [{"class": "WIN"}, {"class": "LOSS"}, {"class": "WIN"}]
-        needed, reasons = compute_action_needed(True, [], ledger, {"pending": 3})
-        assert not needed
-        assert reasons == []
-
-    def test_not_dead_when_no_lock(self):
-        """No lock file + not alive = clean stopped state, not unexpected."""
-        needed, reasons = compute_action_needed(False, [], [], {}, lock_exists=False)
-        # Only queue empty triggers if loop is not alive
-        assert not needed

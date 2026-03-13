@@ -2,44 +2,31 @@
 
 This project uses the `tiny-lab` autonomous research loop. The loop runs experiments, records results, and generates new hypotheses — all without human intervention.
 
-## Your Role: Research Supervisor
-
-You are the **research supervisor**. Your job:
+## Your Role
 
 1. **Set up** the research (`tiny-lab discover` → project.yaml → first hypotheses)
 2. **Start** the loop (`tiny-lab run &` — **MUST be background**, it runs forever)
-3. **Monitor** the loop — check for problems, stalls, or exhausted search spaces
-4. **Evolve** the research — when current levers are exhausted, propose new directions
-5. **Report** findings to the user when they return
+3. **Report** findings to the user when they return
 
 ### CRITICAL: `tiny-lab run` is an INFINITE LOOP
 
 **`tiny-lab run` runs forever.** It continuously picks hypotheses, runs experiments, generates new hypotheses, and repeats indefinitely.
 
-**You MUST run it in the background.** Do not block on it.
-
 ```bash
 tiny-lab run &
-tiny-lab status       # check if it's alive
-tiny-lab board        # check experiment results
+tiny-lab status       # confirm it started
 ```
 
-### Your Role: Lab Manager (Not Executor)
+### The Loop is Fully Autonomous
 
-The loop is an **independent autonomous process**. You supervise it, not drive it.
+Once started, the loop handles everything:
 
-```bash
-tiny-lab status --json   # action_needed tells you if intervention is needed
-tiny-lab board           # Results + generation reasoning
-```
+- Runs experiments, records results
+- Generates new hypotheses when the queue empties (GENERATE phase)
+- GENERATE learns from its own history — avoids repeating strategies, escalates when stuck
+- Tries ensembles, new models, feature engineering when current levers are exhausted
 
-When `action_needed` is true, check the `action_reasons` and act accordingly. When false, do nothing — the loop is working autonomously.
-
-**Event callbacks (optional):**
-
-```bash
-CYCLE_SLEEP=1 tiny-lab run --on-event "tiny-lab status --json > research/.last_status.json" &
-```
+**You do NOT need to monitor or intervene.** After starting, leave it alone until the user returns.
 
 ### DO NOT STOP AFTER INITIAL HYPOTHESES
 

@@ -232,7 +232,6 @@ def cmd_run(project_dir: Path, *, on_event_cmd: str | None = None) -> None:
 def _build_status_data(project_dir: Path) -> dict[str, Any]:
     """Build structured status data."""
     from .ledger import load_ledger
-    from .events import load_events, compute_action_needed
 
     state_path = project_dir / "research" / ".loop_state.json"
     lock_path = project_dir / "research" / ".loop-lock"
@@ -287,18 +286,6 @@ def _build_status_data(project_dir: Path) -> dict[str, Any]:
         for r in recent
     ]
 
-    # Action needed
-    events = load_events(project_dir)
-    needed, reasons = compute_action_needed(
-        loop_alive=alive,
-        events=events,
-        ledger=ledger,
-        queue_counts=queue_counts,
-        lock_exists=lock_path.exists(),
-    )
-    data["action_needed"] = needed
-    data["action_reasons"] = reasons
-
     return data
 
 
@@ -321,11 +308,6 @@ def _format_status(data: dict[str, Any]) -> None:
         print("\nRecent experiments:")
         for row in recent:
             print(f"  {row['id']}: {row.get('class', '?')} | {row.get('metric', {})} | {row.get('description', '')}")
-
-    if data.get("action_needed"):
-        print(f"\nAction needed:")
-        for reason in data.get("action_reasons", []):
-            print(f"  - {reason}")
 
 
 def cmd_status(project_dir: Path, *, as_json: bool = False) -> None:

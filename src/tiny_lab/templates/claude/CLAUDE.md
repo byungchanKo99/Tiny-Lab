@@ -44,45 +44,27 @@ The loop is designed to run indefinitely. **You must NEVER:**
 
 **If you think experiments are "enough"** — you're wrong. The GENERATE phase will try ensembles, new models, feature engineering, and other strategies you haven't considered. Let it run.
 
-### Your Role: Lab Manager (Not Executor)
+### The Loop is Fully Autonomous
 
-The loop is an **independent autonomous process**. You don't own it — you supervise it.
+The loop is an **independent autonomous process**. Once started, it:
 
-### How to Check In
+- Runs experiments from the queue
+- When the queue empties, GENERATE creates new hypotheses automatically
+- GENERATE learns from its own history — it avoids repeating strategies and escalates when stuck
+- When current levers are exhausted, it tries ensembles, new models, feature engineering
+- It only stops on circuit breaker (5 INVALID in 20) or `tiny-lab stop`
 
-```bash
-tiny-lab status --json   # action_needed tells you if intervention is needed
-tiny-lab board           # visual overview of experiment progress
-```
+**You do NOT need to monitor or intervene.** After starting, your job is done until the user returns.
 
-### When `action_needed` is true
+### After Starting
 
-| Reason                        | What to do                                                   |
-| ----------------------------- | ------------------------------------------------------------ |
-| "New best result"             | Note it. Continue monitoring unless user asked for updates.  |
-| "Circuit breaker approaching" | Read loop.log, diagnose INVALID experiments, fix if possible |
-| "Consecutive failures"        | Analyze ledger patterns, consider changing approach          |
-| "Loop stopped unexpectedly"   | Check loop.log, restart if safe                              |
-| "Queue empty"                 | Normal — GENERATE will create new hypotheses automatically   |
-
-### When `action_needed` is false
-
-Do nothing. The loop is working autonomously. Don't interrupt.
-
-### Event Callbacks (optional)
-
-```bash
-CYCLE_SLEEP=1 tiny-lab run --on-event "tiny-lab status --json > research/.last_status.json" &
-```
-
-The `--on-event` flag runs a command on every loop event (experiment done, new best, etc.). Environment variables `TINYLAB_EVENT` and `TINYLAB_EVENT_DATA` are set for the callback.
-
-### DO NOT STOP AFTER INITIAL HYPOTHESES
-
-**Your initial hypotheses are just the seed.** The loop autonomously generates NEW hypotheses after the queue empties (GENERATE phase). These auto-generated experiments often find better results than your initial ones.
+1. Confirm the loop started: `tiny-lab status`
+2. **Leave it alone.** The loop handles everything autonomously.
+3. When the user returns: `tiny-lab board` to summarize results.
 
 NEVER run `tiny-lab run` without `&` (background). NEVER consider the task
-done just because initial hypotheses finished.
+done just because initial hypotheses finished — the loop will keep generating
+and running new experiments.
 
 ### When User Returns
 
