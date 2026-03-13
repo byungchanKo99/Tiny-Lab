@@ -193,12 +193,13 @@ def cmd_init(project_dir: Path, *, global_install: bool = False) -> None:
         for f in skipped:
             print(f"  {f}")
 
-    if not (project_dir / "research" / "ledger.jsonl").exists():
-        (project_dir / "research" / "ledger.jsonl").touch()
+    from .paths import ledger_path, project_yaml_path
+    if not ledger_path(project_dir).exists():
+        ledger_path(project_dir).touch()
         print("  research/ledger.jsonl (empty)")
 
     # Write detected provider into project.yaml
-    project_yaml = project_dir / "research" / "project.yaml"
+    project_yaml = project_yaml_path(project_dir)
     if project_yaml.exists():
         content = project_yaml.read_text()
         content = content.replace("provider: claude", f"provider: {provider_name}")
@@ -231,65 +232,8 @@ def cmd_run(project_dir: Path, *, on_event_cmd: str | None = None) -> None:
 
 def _build_status_data(project_dir: Path) -> dict[str, Any]:
     """Build structured status data."""
-    from .ledger import load_ledger
-    from .events import load_events
-
-    state_path = project_dir / "research" / ".loop_state.json"
-    lock_path = project_dir / "research" / ".loop-lock"
-    queue_path = project_dir / "research" / "hypothesis_queue.yaml"
-
-    # Loop alive?
-    alive = False
-    pid = None
-    if lock_path.exists():
-        try:
-            pid = int(lock_path.read_text().strip())
-            os.kill(pid, 0)
-            alive = True
-        except (ValueError, OSError):
-            pass
-
-    data: dict[str, Any] = {
-        "loop": "RUNNING" if alive else "STOPPED",
-        "pid": pid,
-    }
-
-    # State
-    if state_path.exists():
-        try:
-            state = json.loads(state_path.read_text())
-            data["state"] = state.get("state")
-            data["updated_at"] = state.get("updated_at")
-            ctx = state.get("context", {})
-            data["current_hypothesis"] = ctx.get("hypothesis_id")
-        except json.JSONDecodeError:
-            pass
-
-    # Queue stats
-    queue_counts: dict[str, int] = {}
-    if queue_path.exists():
-        qdata = yaml.safe_load(queue_path.read_text()) or {}
-        for h in qdata.get("hypotheses", []):
-            s = h.get("status", "unknown")
-            queue_counts[s] = queue_counts.get(s, 0) + 1
-    data["queue"] = queue_counts
-
-    # Recent ledger entries
-    ledger = load_ledger(project_dir)
-    recent = ledger[-5:]
-    data["recent_experiments"] = [
-        {
-            "id": r.get("id"),
-            "class": r.get("class"),
-            "metric": {k: v for k, v in r.get("primary_metric", {}).items() if k not in ("baseline", "delta_pct")},
-            "description": r.get("question", "")[:60],
-        }
-        for r in recent
-    ]
-
-    data["recent_events"] = load_events(project_dir, last_n=5)
-
-    return data
+    from .dashboard import build_status_data
+    return build_status_data(project_dir)
 
 
 def _format_status(data: dict[str, Any]) -> None:
@@ -324,7 +268,8 @@ def cmd_status(project_dir: Path, *, as_json: bool = False) -> None:
 
 def cmd_stop(project_dir: Path) -> None:
     """Stop the running loop."""
-    lock_path = project_dir / "research" / ".loop-lock"
+    from .paths import lock_path as _lock_path
+    lock_path = _lock_path(project_dir)
     if not lock_path.exists():
         print("No running loop found.")
         return
@@ -344,7 +289,8 @@ def cmd_stop(project_dir: Path) -> None:
 def cmd_generate(project_dir: Path) -> None:
     """Manually trigger hypothesis generation."""
     from .project import load_project
-    from .generate import generate_hypotheses, load_queue, pending_hypotheses
+    from .generate import generate_hypotheses
+    from .queue import load_queue, pending_hypotheses
     from .providers import get_provider
 
     project = load_project(project_dir)
@@ -400,63 +346,8 @@ Start with Phase 1: SCAN. Scan the current directory and proceed through the pha
 
 def _build_board_data(project_dir: Path) -> dict[str, Any] | None:
     """Load and compute all data needed for the experiment dashboard."""
-    from .project import load_project
-    from .ledger import load_ledger, get_baseline_metric
-    from .generate import load_queue, load_generate_history
-    from .events import load_events
-
-    try:
-        project = load_project(project_dir)
-    except FileNotFoundError:
-        return None
-
-    metric_name = project["metric"]["name"]
-    direction = project["metric"].get("direction", "minimize")
-    ledger = load_ledger(project_dir)
-    baseline = get_baseline_metric(project_dir, metric_name)
-    queue = load_queue(project_dir)
-
-    # Best result
-    best_row = None
-    for row in ledger:
-        if row.get("class") == "BASELINE":
-            continue
-        val = row.get("primary_metric", {}).get(metric_name)
-        if val is None:
-            continue
-        if best_row is None:
-            best_row = row
-        else:
-            best_val = best_row.get("primary_metric", {}).get(metric_name)
-            if direction == "maximize" and val > best_val:
-                best_row = row
-            elif direction == "minimize" and val < best_val:
-                best_row = row
-
-    # Class counts
-    counts: dict[str, int] = {}
-    for row in ledger:
-        c = row.get("class", "UNKNOWN")
-        counts[c] = counts.get(c, 0) + 1
-
-    # Queue counts
-    queue_counts: dict[str, int] = {}
-    for h in queue:
-        s = h.get("status", "unknown")
-        queue_counts[s] = queue_counts.get(s, 0) + 1
-
-    return {
-        "project": project,
-        "metric_name": metric_name,
-        "direction": direction,
-        "ledger": ledger,
-        "baseline": baseline,
-        "best_row": best_row,
-        "counts": counts,
-        "queue_counts": queue_counts,
-        "gen_history": load_generate_history(project_dir),
-        "recent_events": load_events(project_dir, last_n=10),
-    }
+    from .dashboard import build_board_data
+    return build_board_data(project_dir)
 
 
 def _format_value(value: Any) -> str:

@@ -8,6 +8,7 @@ from pathlib import Path
 from .base import AIProvider
 from .claude import ClaudeProvider
 from .codex import CodexProvider
+from ..paths import project_yaml_path
 
 
 def get_provider(project_dir: Path, provider_name: str | None = None) -> AIProvider:
@@ -20,7 +21,7 @@ def get_provider(project_dir: Path, provider_name: str | None = None) -> AIProvi
     4. Default: "claude"
     """
     if provider_name is None:
-        project_yaml = project_dir / "research" / "project.yaml"
+        project_yaml = project_yaml_path(project_dir)
         if project_yaml.exists():
             import yaml
             data = yaml.safe_load(project_yaml.read_text()) or {}

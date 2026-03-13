@@ -6,32 +6,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from .logging import log
+from .paths import generate_summary_path, generate_history_path
+from .queue import load_queue, save_queue, pending_hypotheses
 from .schemas import validate_hypothesis_entry, ValidationError
-
-
-def load_queue(project_dir: Path) -> list[dict[str, Any]]:
-    """Load hypothesis queue from YAML."""
-    path = project_dir / "research" / "hypothesis_queue.yaml"
-    if not path.exists():
-        return []
-    data = yaml.safe_load(path.read_text())
-    if not data or "hypotheses" not in data:
-        return []
-    return data["hypotheses"]
-
-
-def save_queue(project_dir: Path, hypotheses: list[dict[str, Any]]) -> None:
-    """Save hypothesis queue to YAML."""
-    path = project_dir / "research" / "hypothesis_queue.yaml"
-    path.write_text(yaml.dump({"hypotheses": hypotheses}, default_flow_style=False, allow_unicode=True))
-
-
-def pending_hypotheses(queue: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Filter for pending hypotheses."""
-    return [h for h in queue if h.get("status") == "pending"]
 
 
 def _validate_new_entries(
@@ -259,7 +237,7 @@ def generate_hypotheses(project: dict[str, Any], project_dir: Path, provider: An
         )
         prompt = escalation_msg + "\n\n" + prompt
 
-    summary_path = project_dir / "research" / ".generate_summary.json"
+    summary_path = generate_summary_path(project_dir)
     schema_path = Path(__file__).parent / "templates" / "codex" / "schemas" / "generate_summary.json"
 
     before = load_queue(project_dir)
@@ -293,8 +271,8 @@ def generate_hypotheses(project: dict[str, Any], project_dir: Path, provider: An
 
 def _archive_generate_summary(project_dir: Path, valid_count: int) -> None:
     """Read .generate_summary.json (written by AI), archive to .generate_history.jsonl."""
-    summary_path = project_dir / "research" / ".generate_summary.json"
-    history_path = project_dir / "research" / ".generate_history.jsonl"
+    summary_path = generate_summary_path(project_dir)
+    history_path = generate_history_path(project_dir)
 
     entry: dict[str, Any] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -321,7 +299,7 @@ def _archive_generate_summary(project_dir: Path, valid_count: int) -> None:
 
 def load_generate_history(project_dir: Path) -> list[dict[str, Any]]:
     """Load generation history for dashboard display."""
-    path = project_dir / "research" / ".generate_history.jsonl"
+    path = generate_history_path(project_dir)
     if not path.exists():
         return []
     rows = []

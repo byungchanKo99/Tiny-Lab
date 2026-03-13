@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .logging import log
+from .paths import events_path as _events_path
 
 
 class EventType(str, Enum):
@@ -55,7 +56,7 @@ def emit_event(
             "sequence": _next_seq(),
             "data": data or {},
         }
-        events_path = project_dir / "research" / ".events.jsonl"
+        events_path = _events_path(project_dir)
         with events_path.open("a") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -70,7 +71,7 @@ def emit_event(
 
 def load_events(project_dir: Path, last_n: int = 50) -> list[dict[str, Any]]:
     """Load the most recent N events."""
-    path = project_dir / "research" / ".events.jsonl"
+    path = _events_path(project_dir)
     if not path.exists():
         return []
     rows: list[dict[str, Any]] = []

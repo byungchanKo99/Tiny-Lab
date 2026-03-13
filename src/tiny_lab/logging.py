@@ -4,13 +4,15 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .paths import log_path
+
 _log_path: Path | None = None
 
 
 def configure_log(project_dir: Path) -> None:
     """Set the log file path based on project directory."""
     global _log_path
-    _log_path = project_dir / "research" / "loop.log"
+    _log_path = log_path(project_dir)
 
 
 def log(message: str) -> None:

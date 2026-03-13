@@ -7,12 +7,13 @@ from pathlib import Path
 from typing import Any
 
 from .logging import log
+from .paths import ledger_path
 from .schemas import validate, ValidationError
 
 
 def load_ledger(project_dir: Path) -> list[dict[str, Any]]:
     """Load all ledger entries from ledger.jsonl."""
-    path = project_dir / "research" / "ledger.jsonl"
+    path = ledger_path(project_dir)
     if not path.exists():
         return []
     rows = []
@@ -35,7 +36,7 @@ def load_ledger(project_dir: Path) -> list[dict[str, Any]]:
 def append_ledger(project_dir: Path, entry: dict[str, Any]) -> None:
     """Append a single entry to ledger.jsonl. Validates before writing."""
     validate(entry, "ledger_entry")
-    path = project_dir / "research" / "ledger.jsonl"
+    path = ledger_path(project_dir)
     with path.open("a") as f:
         f.write(json.dumps(entry, sort_keys=True) + "\n")
 
@@ -48,6 +49,30 @@ def get_baseline_metric(project_dir: Path, metric_name: str) -> float | None:
             if metric_name in pm:
                 return pm[metric_name]
     return None
+
+
+def find_best_result(
+    ledger: list[dict[str, Any]],
+    metric_name: str,
+    direction: str = "minimize",
+) -> dict[str, Any] | None:
+    """Find the best experiment result by metric value."""
+    best = None
+    for row in ledger:
+        if row.get("class") in ("BASELINE", "INVALID"):
+            continue
+        val = row.get("primary_metric", {}).get(metric_name)
+        if val is None:
+            continue
+        if best is None:
+            best = row
+        else:
+            best_val = best["primary_metric"][metric_name]
+            if direction == "maximize" and val > best_val:
+                best = row
+            elif direction == "minimize" and val < best_val:
+                best = row
+    return best
 
 
 def next_experiment_id(ledger: list[dict[str, Any]]) -> str:

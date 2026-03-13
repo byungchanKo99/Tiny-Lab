@@ -16,13 +16,15 @@ from .baseline import ensure_baseline
 from .build import dispatch_build
 from .errors import BuildError, RunError, TinyLabError
 from .evaluate import dispatch_evaluate, judge_verdict
-from .generate import generate_hypotheses, load_queue, save_queue, pending_hypotheses
-from .ledger import load_ledger, append_ledger, get_baseline_metric, next_experiment_id
+from .generate import generate_hypotheses
+from .queue import load_queue, save_queue, pending_hypotheses
+from .ledger import load_ledger, append_ledger, get_baseline_metric, find_best_result, next_experiment_id
 from .lock import LockManager
 from .logging import configure_log, log
 from .project import load_project
 from .providers import get_provider
 from .events import emit_event, EventType
+from .paths import lock_path as _lock_path, state_path as _state_path
 from .run import dispatch_run
 
 CYCLE_SLEEP = int(os.environ.get("CYCLE_SLEEP", "30"))
@@ -68,8 +70,8 @@ class ResearchLoop:
 
     def __init__(self, project_dir: Path, on_event_cmd: str | None = None):
         self.project_dir = project_dir.resolve()
-        self.lock_path = self.project_dir / "research" / ".loop-lock"
-        self.state_path = self.project_dir / "research" / ".loop_state.json"
+        self.lock_path = _lock_path(self.project_dir)
+        self.state_path = _state_path(self.project_dir)
         self.provider = get_provider(self.project_dir)
         self.on_event_cmd = on_event_cmd
         self._shutdown = False
@@ -292,20 +294,8 @@ class ResearchLoop:
         if ctx.verdict == "WIN" and ctx.new_metric is not None:
             direction = project["metric"].get("direction", "minimize")
             ledger = load_ledger(self.project_dir)
-            is_best = True
-            for r in ledger[:-1]:  # exclude the entry we just appended
-                if r.get("class") in ("BASELINE", "INVALID"):
-                    continue
-                prev_val = r.get("primary_metric", {}).get(metric_name)
-                if prev_val is None:
-                    continue
-                if direction == "maximize" and prev_val >= ctx.new_metric:
-                    is_best = False
-                    break
-                elif direction == "minimize" and prev_val <= ctx.new_metric:
-                    is_best = False
-                    break
-            if is_best:
+            best = find_best_result(ledger, metric_name, direction)
+            if best and best.get("id") == ctx.exp_id:
                 self._emit(EventType.NEW_BEST, {
                     "exp_id": ctx.exp_id,
                     "metric_value": ctx.new_metric,

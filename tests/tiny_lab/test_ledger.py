@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tiny_lab.ledger import load_ledger, append_ledger, get_baseline_metric, next_experiment_id
+from tiny_lab.ledger import load_ledger, append_ledger, get_baseline_metric, find_best_result, next_experiment_id
 from tiny_lab.schemas import ValidationError
 
 
@@ -86,6 +86,54 @@ class TestGetBaselineMetric:
 
     def test_empty_ledger(self, project_dir: Path):
         assert get_baseline_metric(project_dir, "loss") is None
+
+
+class TestFindBestResult:
+    def test_empty_ledger(self):
+        assert find_best_result([], "loss") is None
+
+    def test_skips_baseline_and_invalid(self):
+        ledger = [
+            _make_entry("EXP-001", "BASELINE", 2.0),
+            _make_entry("EXP-002", "INVALID", 0.1),
+        ]
+        assert find_best_result(ledger, "loss") is None
+
+    def test_minimize(self):
+        ledger = [
+            _make_entry("EXP-001", "WIN", 0.5),
+            _make_entry("EXP-002", "WIN", 0.3),
+            _make_entry("EXP-003", "LOSS", 0.8),
+        ]
+        best = find_best_result(ledger, "loss", "minimize")
+        assert best["id"] == "EXP-002"
+
+    def test_maximize(self):
+        ledger = [
+            _make_entry("EXP-001", "WIN", 0.5),
+            _make_entry("EXP-002", "WIN", 0.3),
+            _make_entry("EXP-003", "WIN", 0.8),
+        ]
+        best = find_best_result(ledger, "loss", "maximize")
+        assert best["id"] == "EXP-003"
+
+    def test_single_valid_entry(self):
+        ledger = [
+            _make_entry("EXP-001", "BASELINE", 2.0),
+            _make_entry("EXP-002", "WIN", 0.5),
+        ]
+        best = find_best_result(ledger, "loss")
+        assert best["id"] == "EXP-002"
+
+    def test_missing_metric_skipped(self):
+        entry_no_metric = _make_entry("EXP-001", "WIN", 0.5)
+        entry_no_metric["primary_metric"] = {}
+        ledger = [
+            entry_no_metric,
+            _make_entry("EXP-002", "WIN", 0.8),
+        ]
+        best = find_best_result(ledger, "loss")
+        assert best["id"] == "EXP-002"
 
 
 class TestNextExperimentId:

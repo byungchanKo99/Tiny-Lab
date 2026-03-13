@@ -9,6 +9,7 @@ from typing import Any
 from .envutil import make_env
 from .errors import EvaluateError
 from .logging import log
+from .paths import eval_result_path
 from .providers.base import AIProvider
 from .schemas import validate_eval_result, ValidationError
 
@@ -159,14 +160,14 @@ Be objective. Score based on the criteria, not on effort."""
             log(f"EVALUATE[llm]: subagent call failed for {exp_id}")
             return None
 
-        eval_result_path = project_dir / "research" / f".eval_result_{exp_id}.json"
-        if not eval_result_path.exists():
+        eval_result_path_ = eval_result_path(project_dir, exp_id)
+        if not eval_result_path_.exists():
             last_errors = "Result file not created"
             log(f"EVALUATE[llm]: {exp_id} — result file not found")
             continue
 
         try:
-            data = json.loads(eval_result_path.read_text())
+            data = json.loads(eval_result_path_.read_text())
         except json.JSONDecodeError as e:
             last_errors = f"Invalid JSON: {e}"
             log(f"EVALUATE[llm]: {exp_id} — invalid JSON in result file")
