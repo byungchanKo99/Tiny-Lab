@@ -2,102 +2,96 @@
 
 Deterministic AI-driven research loop. Define levers, set a metric, and let the loop run experiments automatically.
 
+```
+┌─ CHECK_QUEUE ──→ SELECT ──→ BUILD ──→ RUN ──→ EVALUATE ──→ RECORD ─┐
+│                                                                      │
+│  (queue empty + infinite mode)                                       │
+└──→ GENERATE (AI creates new hypotheses) ──→ back to CHECK_QUEUE ────┘
+```
+
 ## Install
 
 ```bash
 pip install git+https://github.com/byungchanko/Tiny-Lab.git
 ```
 
-## 30-Second Setup
+Requires **Python 3.10+** and one of:
+
+- [Claude Code](https://claude.ai/claude-code) — full experience (`/research` command, hooks, sub-agents)
+- [Codex CLI](https://github.com/openai/codex) — set `agent.provider: codex` in project.yaml
+
+## Quick Start
 
 ```bash
 cd your-project
-tiny-lab init            # Scaffold project (auto-detects Claude Code or Codex CLI)
-tiny-lab init --global   # Also install /research command globally (~/.claude/)
-```
+tiny-lab init              # Scaffold project (auto-detects Claude Code or Codex CLI)
 
-Then start research:
-
-```bash
-# With Claude Code:
+# AI-guided setup — analyzes your data, proposes metrics & levers:
+tiny-lab discover "optimize hotel pricing"
+# Or with Claude Code:
 /research 호텔 가격 최적화하고 싶어
 
-# With any provider:
-tiny-lab discover "optimize hotel pricing"
+# Start the loop (always in background)
+CYCLE_SLEEP=1 tiny-lab run > research/tiny_lab_run.out 2>&1 &
+
+# Monitor
+tiny-lab status            # RUNNING / STOPPED
+tiny-lab board             # Results dashboard
+tiny-lab board --plot      # With ASCII sparklines
+tiny-lab board --html      # Chart.js HTML report
 ```
 
-The AI will analyze your data, ask what metric to optimize, what variables to experiment with — then set up everything and start running.
+## Two Research Modes
 
-## Manual Setup
+| User Intent                              | Mode                                            | Command                     |
+| ---------------------------------------- | ----------------------------------------------- | --------------------------- |
+| "Compare 5 models", "test these configs" | **Finite** — stops when queue is exhausted      | `tiny-lab run --until-idle` |
+| "Optimize accuracy", "find best params"  | **Infinite** — generates new hypotheses forever | `tiny-lab run`              |
 
-```bash
-mkdir my-experiment && cd my-experiment
-tiny-lab init              # Scaffold project files
-vim research/project.yaml  # Configure your experiment
-tiny-lab run               # Start the loop (Ctrl+C to stop)
-```
+Both modes **must** run in background (`&`). Infinite mode never exits on its own — stop it with `tiny-lab stop`.
 
 ## How It Works
 
-```
-┌─ CHECK_QUEUE ──→ SELECT ──→ BUILD_COMMAND ──→ RUN ──→ EVALUATE ──→ RECORD ─┐
-│                                                                              │
-│  (queue empty)                                                               │
-└──→ GENERATE (AI creates new hypotheses) ──→ back to CHECK_QUEUE ────────────┘
-```
-
 1. **Pick** a hypothesis from the queue
 2. **Build** the experiment command (replace CLI flags, modify code, or run a script)
-3. **Run** the experiment
+3. **Run** the experiment (shell, surface control plane, or multi-step pipeline)
 4. **Evaluate** the result (parse stdout JSON, run eval script, or AI scoring)
-5. **Record** WIN/LOSS/INVALID to the ledger
-6. **Repeat** until stopped
+5. **Record** WIN / LOSS / INVALID to the append-only ledger
+6. **Repeat** — in infinite mode, GENERATE creates new hypotheses when the queue empties
 
-## CLI Commands
+The loop halts on **circuit breaker** (5 INVALID in last 20 experiments) or `tiny-lab stop`.
 
-| Command             | Description                                               |
-| ------------------- | --------------------------------------------------------- |
-| `tiny-lab init`     | Scaffold a new experiment project (auto-detects provider) |
-| `tiny-lab discover` | Interactive research setup (works with any provider)      |
-| `tiny-lab run`      | Start the research loop                                   |
-| `tiny-lab status`   | Show current loop state                                   |
-| `tiny-lab stop`     | Stop a running loop                                       |
-| `tiny-lab board`    | Show experiment results dashboard                         |
-| `tiny-lab generate` | Generate new hypotheses via AI                            |
+## CLI
 
-## Project Structure (after `tiny-lab init`)
+| Command             | Description                               | Key Flags                                                                      |
+| ------------------- | ----------------------------------------- | ------------------------------------------------------------------------------ |
+| `tiny-lab init`     | Scaffold experiment project               | `--global` (install /research to ~/.claude/), `--update` (overwrite templates) |
+| `tiny-lab discover` | AI-guided interactive setup               | Natural language intent argument                                               |
+| `tiny-lab run`      | Start the research loop                   | `--until-idle` (finite mode), `--on-event CMD` (webhook)                       |
+| `tiny-lab status`   | Show loop state & queue counts            | `--json` (structured output)                                                   |
+| `tiny-lab stop`     | Graceful shutdown (SIGTERM)               |                                                                                |
+| `tiny-lab board`    | Experiment results dashboard              | `--export csv/json`, `--plot`, `--html [FILE]`                                 |
+| `tiny-lab generate` | Manually trigger AI hypothesis generation |                                                                                |
 
-```
-your-project/
-  AGENTS.md                              # Agent instructions (provider-agnostic)
-  CLAUDE.md                              # Agent guide (auto-generated)
-  research/
-    project.yaml                         # Experiment config
-    hypothesis_queue.yaml                # What to try next
-    questions.yaml                       # Research questions
-    ledger.jsonl                         # Results log
-  .claude/
-    commands/research.md                 # /research command
-    agents/
-      hypothesis-generator.md            # Generates hypotheses
-      code-modifier.md                   # Modifies code (build.type: code)
-      ux-evaluator.md                    # Scores artifacts (evaluate.type: llm)
-```
+### Environment Variables
 
-## project.yaml Example
+| Variable           | Default     | Description                                       |
+| ------------------ | ----------- | ------------------------------------------------- |
+| `CYCLE_SLEEP`      | `30`        | Seconds between experiment cycles (recommend `1`) |
+| `TINYLAB_PROVIDER` | auto-detect | Force `claude` or `codex`                         |
+| `CLAUDE_MAX_TURNS` | `20`        | Max turns for Claude provider                     |
+
+## project.yaml
 
 ```yaml
 name: hotel-pricing
 description: "Optimize hotel RevPAR by adjusting pricing parameters"
 
-agent:
-  provider: claude # claude | codex
-
 build:
   type: flag # flag | script | code
 
 run:
-  type: command # surface | command | pipeline
+  type: command # command | surface | pipeline
 
 evaluate:
   type: stdout_json # stdout_json | script | llm
@@ -132,31 +126,82 @@ Your experiment script must print the metric as JSON to stdout:
 
 ## Plugin Types
 
-| Phase    | Type          | Description                             | Needs AI? |
-| -------- | ------------- | --------------------------------------- | --------- |
-| BUILD    | `flag`        | Replace CLI flags in baseline command   | No        |
-| BUILD    | `script`      | Use predefined script per lever:value   | No        |
-| BUILD    | `code`        | AI modifies source code                 | Yes       |
-| RUN      | `command`     | Direct shell execution                  | No        |
-| RUN      | `surface`     | Via surface control plane               | No        |
-| RUN      | `pipeline`    | Multi-step with background processes    | No        |
-| EVALUATE | `stdout_json` | Parse metric from stdout                | No        |
-| EVALUATE | `script`      | Run separate eval script                | No        |
-| EVALUATE | `llm`         | AI scores artifacts (screenshots, HTML) | Yes       |
+| Phase    | Type          | Description                                                   | Needs AI? |
+| -------- | ------------- | ------------------------------------------------------------- | --------- |
+| BUILD    | `flag`        | Replace CLI flags in baseline command (single or multi-lever) | No        |
+| BUILD    | `script`      | Use predefined script per lever:value                         | No        |
+| BUILD    | `code`        | AI modifies source code via sub-agent                         | Yes       |
+| RUN      | `command`     | Direct shell execution                                        | No        |
+| RUN      | `surface`     | Via surface control plane (v1)                                | No        |
+| RUN      | `pipeline`    | Multi-step workflow with background processes                 | No        |
+| EVALUATE | `stdout_json` | Parse metric from last JSON object in stdout                  | No        |
+| EVALUATE | `script`      | Run separate eval script (supports retries)                   | No        |
+| EVALUATE | `llm`         | AI scores artifacts (screenshots, HTML, etc.)                 | Yes       |
 
-## Requirements
+## Project Structure
 
-- Python 3.10+
-- One of:
-  - [Claude Code](https://claude.ai/claude-code) — full experience (`/research` command, hooks, agents)
-  - [Codex CLI](https://github.com/openai/codex) — set `agent.provider: codex` in project.yaml
+After `tiny-lab init`:
+
+```
+your-project/
+  AGENTS.md                          # Agent instructions (provider-agnostic)
+  CLAUDE.md                          # Claude Code guide (auto-generated)
+  research/
+    project.yaml                     # Experiment config
+    hypothesis_queue.yaml            # Hypothesis queue (pending/running/done/skipped)
+    questions.yaml                   # Research questions
+    ledger.jsonl                     # Append-only results log
+    loop.log                         # Loop execution log
+    reports/                         # Per-experiment markdown reports
+    .loop-lock                       # PID lock file
+    .loop_state.json                 # Crash recovery state
+    .events.jsonl                    # Event log
+    .generate_history.jsonl          # AI generation reasoning history
+  .claude/
+    commands/research.md             # /research slash command
+    agents/
+      hypothesis-generator.md        # Generates hypotheses
+      code-modifier.md               # Modifies code (build.type: code)
+      ux-evaluator.md                # Scores artifacts (evaluate.type: llm)
+```
+
+## Architecture
+
+25 modules organized in layers:
+
+| Layer         | Modules                                                   |
+| ------------- | --------------------------------------------------------- |
+| **Entry**     | `cli`                                                     |
+| **Core**      | `loop` (state machine)                                    |
+| **Logic**     | `generate`, `build`, `run`, `evaluate`, `baseline`        |
+| **Data**      | `project`, `queue`, `ledger`, `schemas`, `migrate`        |
+| **Query**     | `dashboard`, `report`                                     |
+| **Infra**     | `paths`, `errors`, `logging`, `lock`, `events`, `envutil` |
+| **Providers** | `claude`, `codex` (via abstract `AIProvider`)             |
+
+Schema versioning with auto-migration (v1 → v2). See `docs/architecture.md` for detailed diagrams.
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest tests/tiny_lab/
+```
+
+193 tests across 12 test files covering state machine transitions, plugin dispatch, schema migration, event system, multi-lever experiments, error recovery, and circuit breaker.
 
 ## Legacy
 
-This repo also contains the original `bin/surface` control plane and `examples/mlx/` trainer from the 1.0 release. See `bin/surface --help` for the original experiment tooling. The `tiny-lab` CLI is the v2 interface built on top.
+This repo also contains the original `bin/surface` control plane and `examples/mlx/` trainer from the 1.0 release. See `bin/surface --help` for the original experiment tooling.
 
 ## Credits
+
+Forked from [trevin-creator/Tiny-Lab](https://github.com/trevin-creator/Tiny-Lab).
 
 - Trevin Peterson — original tiny-lab system design
 - Andrej Karpathy — `autoresearch` and the research-loop framing
 - Full attribution in `CREDITS.md`
+
+## License
+
+MIT
