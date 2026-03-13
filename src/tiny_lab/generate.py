@@ -216,6 +216,9 @@ def generate_hypotheses(project: dict[str, Any], project_dir: Path, provider: An
         )
         if result.returncode != 0:
             log(f"GENERATE: {provider.name} exited with code {result.returncode}")
+            if result.stderr:
+                for line in result.stderr.strip().splitlines()[-10:]:
+                    log(f"GENERATE: stderr: {line}")
     except RuntimeError as e:
         log(f"GENERATE: {e}")
         return False

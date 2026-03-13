@@ -91,6 +91,9 @@ CODE_MODIFIED: {hypothesis['id']}"""
     result = provider.run(prompt, tools=["Read", "Write", "Edit", "Bash"], cwd=str(project_dir))
     if result.returncode != 0:
         log(f"BUILD[code]: {provider.name} subagent failed (exit={result.returncode})")
+        if result.stderr:
+            for line in result.stderr.strip().splitlines()[-10:]:
+                log(f"BUILD[code]: stderr: {line}")
         raise BuildError(f"Code modifier failed for {hypothesis['id']}")
 
     return project["baseline"]["command"].strip()

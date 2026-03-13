@@ -16,6 +16,7 @@ from tiny_lab.build import build_command_multi_flag, dispatch_build
 from tiny_lab.errors import BuildError, TinyLabError
 from tiny_lab.schemas import validate_hypothesis_entry
 from tiny_lab.cli import _build_board_data, _export_board, _format_sparklines, _format_value
+from tiny_lab.generate import generate_hypotheses
 from tiny_lab.report import generate_html_report
 
 
@@ -30,6 +31,7 @@ def project_dir(tmp_path: Path) -> Path:
     (research / "ledger.jsonl").touch()
     project = {
         "name": "test",
+        "description": "test experiment",
         "baseline": {"command": "python train.py --lr 0.01 --epochs 10"},
         "metric": {"name": "loss", "direction": "minimize"},
         "levers": {
@@ -487,3 +489,92 @@ class TestEvaluateRetry:
         result = evaluate_with_script(project, None, "EXP-001", Path("/tmp"))
         assert result is None
         assert mock_run.call_count == 2
+
+
+# ===========================================================================
+# Stderr logging on provider failure
+# ===========================================================================
+
+class TestStderrLogging:
+    """Provider stderr is logged on failure for diagnostics."""
+
+    def test_generate_logs_stderr_on_failure(self, project_dir: Path):
+        """GENERATE should log stderr lines when provider exits non-zero."""
+        provider = MagicMock()
+        provider.name = "codex"
+        provider.run_structured.return_value = subprocess.CompletedProcess(
+            args="", returncode=1, stdout="",
+            stderr="Error: failed to lookup address information\nstream disconnected before completion",
+        )
+
+        project = _load_project(project_dir)
+        logged = []
+        with patch("tiny_lab.generate.log", side_effect=lambda msg: logged.append(msg)):
+            generate_hypotheses(project, project_dir, provider)
+
+        stderr_logs = [l for l in logged if "stderr:" in l]
+        assert len(stderr_logs) == 2
+        assert "failed to lookup address" in stderr_logs[0]
+        assert "stream disconnected" in stderr_logs[1]
+
+    def test_generate_no_stderr_log_on_success(self, project_dir: Path):
+        """No stderr logging when provider succeeds."""
+        provider = MagicMock()
+        provider.name = "codex"
+        provider.run_structured.return_value = subprocess.CompletedProcess(
+            args="", returncode=0, stdout="ok", stderr="",
+        )
+
+        project = _load_project(project_dir)
+        logged = []
+        with patch("tiny_lab.generate.log", side_effect=lambda msg: logged.append(msg)):
+            generate_hypotheses(project, project_dir, provider)
+
+        stderr_logs = [l for l in logged if "stderr:" in l]
+        assert len(stderr_logs) == 0
+
+    def test_generate_truncates_long_stderr(self, project_dir: Path):
+        """Only last 10 lines of stderr are logged."""
+        provider = MagicMock()
+        provider.name = "codex"
+        stderr_lines = "\n".join(f"line {i}" for i in range(20))
+        provider.run_structured.return_value = subprocess.CompletedProcess(
+            args="", returncode=1, stdout="", stderr=stderr_lines,
+        )
+
+        project = _load_project(project_dir)
+        logged = []
+        with patch("tiny_lab.generate.log", side_effect=lambda msg: logged.append(msg)):
+            generate_hypotheses(project, project_dir, provider)
+
+        stderr_logs = [l for l in logged if "stderr:" in l]
+        assert len(stderr_logs) == 10
+        assert "line 10" in stderr_logs[0]
+        assert "line 19" in stderr_logs[9]
+
+    def test_build_code_logs_stderr_on_failure(self):
+        """BUILD[code] should log stderr when provider fails."""
+        from tiny_lab.build import build_command_code
+
+        provider = MagicMock()
+        provider.name = "codex"
+        provider.run.return_value = subprocess.CompletedProcess(
+            args="", returncode=1, stdout="",
+            stderr="DNS resolution failed\nconnection refused",
+        )
+
+        project = {
+            "name": "test", "description": "test",
+            "baseline": {"command": "echo test"},
+            "build": {"target_files": []},
+        }
+        hyp = {"id": "H-1", "lever": "lr", "value": "0.05", "description": "test"}
+
+        logged = []
+        with patch("tiny_lab.build.log", side_effect=lambda msg: logged.append(msg)), \
+             pytest.raises(BuildError):
+            build_command_code(project, hyp, Path("/tmp"), provider)
+
+        stderr_logs = [l for l in logged if "stderr:" in l]
+        assert len(stderr_logs) == 2
+        assert "DNS resolution" in stderr_logs[0]

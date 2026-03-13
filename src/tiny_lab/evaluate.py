@@ -151,7 +151,10 @@ Be objective. Score based on the criteria, not on effort."""
 
         log(f"EVALUATE[llm]: calling {provider.name} for {exp_id} (attempt {attempt}/{max_attempts})")
         try:
-            provider.run(current_prompt, tools=["Read", "Bash"], max_turns=10, cwd=str(project_dir))
+            result = provider.run(current_prompt, tools=["Read", "Bash"], max_turns=10, cwd=str(project_dir))
+            if result.returncode != 0 and result.stderr:
+                for line in result.stderr.strip().splitlines()[-10:]:
+                    log(f"EVALUATE[llm]: stderr: {line}")
         except RuntimeError:
             log(f"EVALUATE[llm]: subagent call failed for {exp_id}")
             return None
