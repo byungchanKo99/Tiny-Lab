@@ -122,6 +122,12 @@ Key files (in research/):
                               help="Add ASCII sparklines: metric trend over time + per-lever WIN/LOSS bars")
     board_parser.add_argument("--html", metavar="FILE", nargs="?", const="research/report.html",
                               help="Generate self-contained HTML report with Chart.js visualizations")
+    board_parser.add_argument("--live", action="store_true",
+                              help="Start live dashboard on localhost (auto-refreshing HTML, default port 8505)")
+    board_parser.add_argument("--port", type=int, default=8505,
+                              help="Port for live dashboard (default: 8505)")
+    board_parser.add_argument("--refresh", type=int, default=5,
+                              help="Auto-refresh interval in seconds for live dashboard (default: 5)")
     board_parser.add_argument("-o", "--output", help="Output file path (for --export)")
 
     discover_parser = sub.add_parser(
@@ -598,9 +604,15 @@ def cmd_board(project_dir: Path, args: argparse.Namespace | None = None) -> None
     export_fmt = getattr(args, "export", None) if args else None
     do_plot = getattr(args, "plot", False) if args else False
     html_path = getattr(args, "html", None) if args else None
+    do_live = getattr(args, "live", False) if args else False
     output_path = getattr(args, "output", None) if args else None
 
-    if export_fmt:
+    if do_live:
+        from .server import serve_dashboard
+        port = getattr(args, "port", 8505)
+        refresh = getattr(args, "refresh", 5)
+        serve_dashboard(project_dir, port=port, refresh=refresh)
+    elif export_fmt:
         _export_board(data, export_fmt, output_path)
     elif do_plot:
         _format_board(data)
