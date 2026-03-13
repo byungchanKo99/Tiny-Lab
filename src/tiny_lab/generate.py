@@ -28,6 +28,7 @@ def _validate_new_entries(
     invalid_ids = []
 
     for entry in new_entries:
+        entry.setdefault("generated_at", datetime.now(timezone.utc).isoformat())
         errors = validate_hypothesis_entry(entry, strict=False)
         if errors:
             log(f"GENERATE: invalid hypothesis {entry.get('id', '?')}: {errors}")
@@ -35,11 +36,14 @@ def _validate_new_entries(
         else:
             valid_count += 1
 
-    # Remove invalid entries
+    # Remove invalid entries or save updated entries (with generated_at)
     if invalid_ids:
         cleaned = [h for h in after if h.get("id") not in invalid_ids]
         save_queue(project_dir, cleaned)
         log(f"GENERATE: removed {len(invalid_ids)} invalid entries")
+    elif new_entries:
+        # Save back to persist generated_at timestamps
+        save_queue(project_dir, after)
 
     return valid_count
 
@@ -58,6 +62,20 @@ CURRENT LEVERS:
 
 RULES:
 {rules_text}
+
+STEP 0: RESEARCH EXISTING APPROACHES
+
+Before analyzing results, search the web for relevant techniques:
+- Search for papers, blog posts, or known best practices for this type of problem
+- Look for benchmark results on similar datasets or tasks
+- Find techniques that top practitioners use
+
+Use WebSearch to find relevant information. Examples:
+  - "best models for tabular classification 2024"
+  - "ensemble methods vs gradient boosting benchmark"
+  - "{project_description} state of the art"
+
+Cite what you find in your hypothesis reasoning fields.
 
 STEP 1: READ AND ANALYZE (do this first, do not skip)
 
@@ -124,6 +142,13 @@ You have FULL AUTHORITY to evolve the research. You MUST make bold, structural c
    update baseline.command in project.yaml to the best-known configuration.
    Future experiments will be measured against this new, higher bar.
 
+BEFORE generating hypotheses, USE WEB SEARCH to find:
+- What techniques are known to work for this type of problem?
+- Are there recent papers or benchmarks that suggest a different approach?
+- What would a Kaggle grandmaster try next?
+
+Include citations in each hypothesis's reasoning field.
+
 ANTI-PATTERN: Generating 5 hypotheses that all tweak the same hyperparameter by small amounts.
 GOOD PATTERN: 1 ensemble hypothesis + 1 new model family + 1 feature engineering + 2 novel ideas.
 
@@ -148,7 +173,16 @@ Each hypothesis MUST have:
 - status: pending
 - lever: {{lever name, or "multi" for combinations}}
 - value: {{single string/number for one lever, OR a dict like {{"lr": "0.05", "batch_size": "32"}} for multi-lever}}
-- description: "{{one line — include your REASONING, not just what you're changing}}"
+- description: "{{short label — what you're changing}}"
+- reasoning: "{{WHY you chose this — cite technique, paper, prior experiment, or domain knowledge}}"
+
+Example:
+- id: H-10
+  status: pending
+  lever: "model"
+  value: "xgboost"
+  description: "XGBoost with default params"
+  reasoning: "XGBoost often outperforms RF on tabular data (Chen & Guestrin, 2016). Based on EXP-014, gradient_boosting@200 peaked — XGBoost's regularization may push further."
 
 MULTI-LEVER COMBINATIONS:
 When you want to test multiple levers simultaneously, use lever: "multi" and value as a dict.
@@ -180,6 +214,106 @@ After generating hypotheses, write a JSON summary file to research/.generate_sum
 The 'references' field is optional — cite when a hypothesis is inspired by a technique, paper, or prior experiment.
 
 This file will be overwritten each generation cycle. The loop will archive it.
+Also log what you did and why to research/loop.log (append a summary line)."""
+
+
+_GENERATE_PROMPT_V2_TEMPLATE = """\
+You are the autonomous research strategist for an experiment loop with a built-in optimizer.
+
+YOU decide the STRATEGY. The optimizer decides the PARAMETERS.
+- DO: "Try ViT with augmentation" + search_space for lr, epochs, patch_size
+- DON'T: "Try lr=0.05" (this is the optimizer's job)
+
+PROJECT: {project_name}
+DESCRIPTION: {project_description}
+METRIC: {metric_name} (direction: {metric_direction})
+OPTIMIZER: {optimize_type} (time_budget: {time_budget}s, n_trials: {n_trials})
+
+CURRENT LEVERS (for parameter flag mapping):
+{levers_text}
+
+RULES:
+{rules_text}
+
+STEP 0: RESEARCH EXISTING APPROACHES
+
+Before analyzing results, search the web for relevant techniques:
+- Search for papers, blog posts, or known best practices for this type of problem
+- Look for benchmark results on similar datasets or tasks
+- Find techniques that top practitioners use
+
+Use WebSearch to find relevant information.
+Cite what you find in your hypothesis reasoning fields.
+
+STEP 1: READ AND ANALYZE (do this first, do not skip)
+
+Read these files and build a mental model of the research so far:
+- research/ledger.jsonl — all past experiments with optimize_result details
+- research/questions.yaml — research questions
+- research/hypothesis_queue.yaml — pending/done hypotheses
+- research/project.yaml — current configuration
+
+Pay special attention to optimize_result in ledger entries — these show how many trials
+the optimizer ran and what parameters it found optimal for each approach.
+
+STEP 2: DIAGNOSE THE RESEARCH STATE
+
+Same as before: EXPLORING, REFINING, SATURATED, or STUCK.
+But now focus on APPROACHES rather than individual parameter values.
+
+STEP 3: ACT BASED ON STATE
+
+**If EXPLORING:** Try fundamentally different approaches (algorithms, architectures).
+**If REFINING:** Narrow the search space or increase n_trials for the best approach.
+**If SATURATED:** Ensemble top approaches, try novel architectures, or feature engineering.
+**If STUCK:** Check if search spaces are mis-specified or if the approach itself is flawed.
+
+STEP 4: GENERATE HYPOTHESES
+
+Each hypothesis MUST have:
+- id: H-{{next number}}
+- status: pending
+- approach: "{{algorithm/method name}}"
+- description: "{{what you're trying and why}}"
+- reasoning: "{{cite technique, paper, prior experiment}}"
+- search_space: {{param_name: {{type: int|float|categorical, low:, high:, choices:, ...}}}}
+
+Optional:
+- code_changes: "description of script changes needed" (triggers BUILD[code])
+- optimize_type: "optuna|grid|random|custom" (override project default)
+- optimize_script: "path/to/script" (for custom optimizer)
+- references: ["papers", "URLs"]
+
+Example:
+- id: H-10
+  status: pending
+  approach: "xgboost_stacking"
+  description: "XGBoost+LightGBM stacking ensemble"
+  reasoning: "Stacking often outperforms individual models (Wolpert, 1992). Top 3 approaches were XGB, LGB, RF."
+  search_space:
+    lr: {{type: float, low: 0.001, high: 0.3, log: true}}
+    n_estimators: {{type: int, low: 50, high: 500}}
+    max_depth: {{type: int, low: 3, high: 10}}
+
+ANTI-PATTERN: All hypotheses exploring the same approach with different search spaces.
+GOOD PATTERN: Each hypothesis tries a fundamentally different approach.
+
+STEP 5: WRITE GENERATION SUMMARY
+
+Write to research/.generate_summary.json:
+
+```json
+{{
+  "state": "EXPLORING|REFINING|SATURATED|STUCK",
+  "reasoning": "2-3 sentence explanation",
+  "best_so_far": {{"experiment_id": "EXP-XXX", "metric_value": 123.4, "config": "brief description"}},
+  "hypotheses_added": ["H-XX", "H-YY"],
+  "changes_made": ["added approach X", "narrowed search space for Y"],
+  "references": ["technique or paper"],
+  "experiments_analyzed": 10
+}}
+```
+
 Also log what you did and why to research/loop.log (append a summary line)."""
 
 
@@ -243,14 +377,28 @@ def generate_hypotheses(project: dict[str, Any], project_dir: Path, provider: An
         else:
             levers_desc.append(f"  {name}: type={lever.get('type', 'choice')}, space={lever['space']}")
 
-    prompt = _GENERATE_PROMPT_TEMPLATE.format(
-        project_name=project["name"],
-        project_description=project["description"],
-        metric_name=project["metric"]["name"],
-        metric_direction=project["metric"].get("direction", "minimize"),
-        levers_text="\n".join(levers_desc),
-        rules_text="\n".join("- " + r for r in project.get("rules", [])),
-    )
+    optimize_config = project.get("optimize")
+    if optimize_config:
+        prompt = _GENERATE_PROMPT_V2_TEMPLATE.format(
+            project_name=project["name"],
+            project_description=project.get("description", ""),
+            metric_name=project["metric"]["name"],
+            metric_direction=project["metric"].get("direction", "minimize"),
+            optimize_type=optimize_config.get("type", "optuna"),
+            time_budget=optimize_config.get("time_budget", "unlimited"),
+            n_trials=optimize_config.get("n_trials", "auto"),
+            levers_text="\n".join(levers_desc),
+            rules_text="\n".join("- " + r for r in project.get("rules", [])),
+        )
+    else:
+        prompt = _GENERATE_PROMPT_TEMPLATE.format(
+            project_name=project["name"],
+            project_description=project.get("description", ""),
+            metric_name=project["metric"]["name"],
+            metric_direction=project["metric"].get("direction", "minimize"),
+            levers_text="\n".join(levers_desc),
+            rules_text="\n".join("- " + r for r in project.get("rules", [])),
+        )
 
     # Inject generation history context
     history = load_generate_history(project_dir)
@@ -286,7 +434,7 @@ def generate_hypotheses(project: dict[str, Any], project_dir: Path, provider: An
             prompt,
             output_path=summary_path,
             schema_path=schema_path,
-            tools=["Read", "Write", "Edit", "Bash"],
+            tools=["Read", "Write", "Edit", "Bash", "WebSearch", "WebFetch"],
             cwd=str(project_dir),
         )
         if result.returncode != 0:

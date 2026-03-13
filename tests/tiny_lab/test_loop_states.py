@@ -9,6 +9,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 import yaml
 
+from tiny_lab.errors import OptimizeError
 from tiny_lab.events import load_events, reset_event_seq
 from tiny_lab.loop import ResearchLoop, State, CycleContext
 
@@ -131,7 +132,7 @@ class TestHandleBuildCommand:
         project = _load_project(project_dir)
         ctx = CycleContext(hypothesis={"id": "H-1", "lever": "lr", "value": "0.05", "description": "test"})
         state = loop._handle_build_command(ctx, project)
-        assert state == State.RUN
+        assert state == State.OPTIMIZE
         assert ctx.command is not None
         assert "--lr 0.05" in ctx.command
         assert ctx.exp_id is not None
@@ -145,13 +146,13 @@ class TestHandleBuildCommand:
         assert ctx.hypothesis is None
 
 
-class TestHandleRun:
+class TestHandleRunSingle:
     @patch("tiny_lab.loop.dispatch_run")
     def test_successful_run(self, mock_run, loop: ResearchLoop, project_dir: Path):
         mock_run.return_value = subprocess.CompletedProcess(args="", returncode=0, stdout="ok", stderr="")
         project = _load_project(project_dir)
         ctx = CycleContext(command="echo test", exp_id="EXP-002")
-        state = loop._handle_run(ctx, project)
+        state = loop._handle_run_single(ctx, project)
         assert state == State.EVALUATE
         assert ctx.run_result is not None
         assert ctx.run_result.returncode == 0
@@ -162,9 +163,63 @@ class TestHandleRun:
         mock_run.side_effect = RunError("Experiment EXP-002 timed out")
         project = _load_project(project_dir)
         ctx = CycleContext(command="echo test", exp_id="EXP-002")
-        state = loop._handle_run(ctx, project)
+        state = loop._handle_run_single(ctx, project)
         assert state == State.EVALUATE
         assert ctx.run_result is None
+
+
+class TestHandleOptimize:
+    def test_no_search_space_falls_back_to_single_run(self, loop: ResearchLoop, project_dir: Path):
+        """v1 hypothesis without search_space goes through single RUN."""
+        project = _load_project(project_dir)
+        ctx = CycleContext(
+            hypothesis={"id": "H-1", "lever": "lr", "value": "0.05", "description": "test"},
+            command="echo test", exp_id="EXP-002",
+        )
+        with patch("tiny_lab.loop.dispatch_run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(args="", returncode=0, stdout="ok", stderr="")
+            state = loop._handle_optimize(ctx, project)
+        assert state == State.EVALUATE
+
+    @patch("tiny_lab.optimize.dispatch_optimize")
+    def test_with_search_space_runs_optimizer(self, mock_opt, loop: ResearchLoop, project_dir: Path):
+        """v2 hypothesis with search_space dispatches to optimizer."""
+        from tiny_lab.optimize import OptimizeResult
+        mock_opt.return_value = OptimizeResult(
+            best_value=0.3, best_params={"lr": 0.05},
+            n_trials=5, total_seconds=10.0,
+            best_stdout='{"loss": 0.3}\n', best_stderr="",
+        )
+        project = _load_project(project_dir)
+        ctx = CycleContext(
+            hypothesis={
+                "id": "H-10", "approach": "xgboost", "description": "test",
+                "search_space": {"lr": {"type": "float", "low": 0.001, "high": 0.1}},
+            },
+            command="echo test", exp_id="EXP-002",
+        )
+        state = loop._handle_optimize(ctx, project)
+        assert state == State.EVALUATE
+        assert ctx.optimize_result is not None
+        assert ctx.new_metric == 0.3
+        assert ctx.run_result is not None
+
+    @patch("tiny_lab.optimize.dispatch_optimize", side_effect=OptimizeError("fail"))
+    def test_optimizer_error_falls_back(self, mock_opt, loop: ResearchLoop, project_dir: Path):
+        """OptimizeError falls back to single RUN."""
+        from tiny_lab.errors import OptimizeError as OE
+        project = _load_project(project_dir)
+        ctx = CycleContext(
+            hypothesis={
+                "id": "H-10", "approach": "xgboost", "description": "test",
+                "search_space": {"lr": {"type": "float", "low": 0.001, "high": 0.1}},
+            },
+            command="echo test", exp_id="EXP-002",
+        )
+        with patch("tiny_lab.loop.dispatch_run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(args="", returncode=0, stdout="ok", stderr="")
+            state = loop._handle_optimize(ctx, project)
+        assert state == State.EVALUATE
 
 
 class TestHandleEvaluate:
@@ -224,6 +279,37 @@ class TestHandleRecord:
         recorded = json.loads(lines[1])
         assert recorded["id"] == "EXP-002"
         assert recorded["class"] == "WIN"
+        assert recorded["hypothesis_id"] == "H-1"
+        assert recorded["config"] == {"lr": "0.05"}
+        assert recorded["reasoning"] == ""
+
+    def test_records_hypothesis_reasoning(self, loop: ResearchLoop, project_dir: Path):
+        """Ledger entry includes reasoning from hypothesis."""
+        baseline = {
+            "id": "EXP-001", "question": "baseline", "family": "test",
+            "changed_variable": "baseline", "value": "baseline", "control": "EXP-001",
+            "status": "done", "class": "BASELINE",
+            "primary_metric": {"loss": 1.0, "baseline": 1.0, "delta_pct": 0.0},
+            "decision": "baseline",
+        }
+        (project_dir / "research" / "ledger.jsonl").write_text(json.dumps(baseline) + "\n")
+        _add_hypotheses(project_dir, [{"id": "H-2", "status": "running", "lever": "lr", "value": "0.05",
+                                        "description": "lower lr", "reasoning": "LR 0.01 won, try 0.05"}])
+
+        project = _load_project(project_dir)
+        ctx = CycleContext(
+            hypothesis={"id": "H-2", "lever": "lr", "value": "0.05", "description": "lower lr",
+                         "reasoning": "LR 0.01 won, try 0.05"},
+            command="echo test", exp_id="EXP-003", new_metric=0.4, verdict="WIN",
+        )
+        with patch.object(loop, "_sleep"):
+            loop._handle_record(ctx, project)
+
+        lines = (project_dir / "research" / "ledger.jsonl").read_text().strip().splitlines()
+        recorded = json.loads(lines[-1])
+        assert recorded["hypothesis_id"] == "H-2"
+        assert recorded["reasoning"] == "LR 0.01 won, try 0.05"
+        assert recorded["config"] == {"lr": "0.05"}
 
     def test_record_emits_experiment_done_event(self, loop: ResearchLoop, project_dir: Path):
         baseline = {
@@ -298,6 +384,47 @@ class TestHandleRecord:
         assert len(new_best_events) == 1
         assert new_best_events[0]["data"]["exp_id"] == "EXP-002"
         assert new_best_events[0]["data"]["metric_value"] == 0.5
+
+
+class TestHandleRecordV2:
+    """Tests for v2 (approach-based) hypothesis recording."""
+
+    def test_records_v2_hypothesis_with_optimize_result(self, loop: ResearchLoop, project_dir: Path):
+        from tiny_lab.optimize import OptimizeResult
+        baseline = {
+            "id": "EXP-001", "question": "baseline", "family": "test",
+            "changed_variable": "baseline", "value": "baseline", "control": "EXP-001",
+            "status": "done", "class": "BASELINE",
+            "primary_metric": {"loss": 1.0, "baseline": 1.0, "delta_pct": 0.0},
+            "decision": "baseline",
+        }
+        (project_dir / "research" / "ledger.jsonl").write_text(json.dumps(baseline) + "\n")
+        _add_hypotheses(project_dir, [{
+            "id": "H-10", "status": "running", "approach": "xgboost",
+            "description": "XGBoost stacking",
+        }])
+
+        project = _load_project(project_dir)
+        opt_result = OptimizeResult(
+            best_value=0.3, best_params={"lr": 0.05, "depth": 5},
+            n_trials=10, total_seconds=30.0,
+        )
+        ctx = CycleContext(
+            hypothesis={"id": "H-10", "approach": "xgboost", "description": "XGBoost stacking"},
+            command="echo test", exp_id="EXP-002", new_metric=0.3, verdict="WIN",
+            optimize_result=opt_result,
+        )
+        with patch.object(loop, "_sleep"):
+            state = loop._handle_record(ctx, project)
+        assert state == State.CHECK_QUEUE
+
+        lines = (project_dir / "research" / "ledger.jsonl").read_text().strip().splitlines()
+        recorded = json.loads(lines[-1])
+        assert recorded["changed_variable"] == "xgboost"
+        assert recorded["approach"] == "xgboost"
+        assert recorded["optimize_result"]["n_trials"] == 10
+        assert recorded["optimize_result"]["best_params"] == {"lr": 0.05, "depth": 5}
+        assert recorded["config"] == {"lr": 0.05, "depth": 5}
 
 
 class TestCircuitBreakerWarning:

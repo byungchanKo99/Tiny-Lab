@@ -21,6 +21,8 @@ class EventType(str, Enum):
     GENERATE_ENTER = "generate_enter"
     CIRCUIT_BREAKER_WARNING = "circuit_breaker_warning"
     IDLE_STOP = "idle_stop"
+    OPTIMIZE_STARTED = "optimize_started"
+    OPTIMIZE_FINISHED = "optimize_finished"
 
 
 _event_seq = 0

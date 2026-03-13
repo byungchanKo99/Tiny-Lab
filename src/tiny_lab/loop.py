@@ -14,7 +14,7 @@ from typing import Any
 
 from .baseline import ensure_baseline
 from .build import dispatch_build
-from .errors import BuildError, RunError, TinyLabError
+from .errors import BuildError, OptimizeError, RunError, TinyLabError
 from .evaluate import dispatch_evaluate, judge_verdict
 from .generate import generate_hypotheses
 from .queue import load_queue, save_queue, pending_hypotheses
@@ -39,6 +39,7 @@ class State(Enum):
     SELECT = "select"
     BUILD_COMMAND = "build_command"
     RUN = "run"
+    OPTIMIZE = "optimize"
     EVALUATE = "evaluate"
     RECORD = "record"
 
@@ -54,6 +55,7 @@ class CycleContext:
     new_metric: float | None = None
     verdict: str = ""
     consecutive_generate_failures: int = 0
+    optimize_result: Any | None = None  # OptimizeResult when inner loop runs
 
     def reset_experiment(self) -> None:
         """Clear per-experiment fields after RECORD."""
@@ -63,6 +65,7 @@ class CycleContext:
         self.run_result = None
         self.new_metric = None
         self.verdict = ""
+        self.optimize_result = None
 
 
 class ResearchLoop:
@@ -231,16 +234,55 @@ class ResearchLoop:
         try:
             ctx.command = dispatch_build(project, ctx.hypothesis, self.project_dir, self.provider)
             log(f"BUILD[{build_type}]: {ctx.exp_id} -> {ctx.command[:120]}")
-            return State.RUN
+            return State.OPTIMIZE
         except BuildError as e:
             log(f"BUILD[{build_type}]: {ctx.hypothesis['id']} failed -- {e}")
             self._mark_hypothesis(ctx.hypothesis, "skipped")
             ctx.reset_experiment()
             return State.CHECK_QUEUE
 
-    def _handle_run(self, ctx: CycleContext, project: dict[str, Any]) -> State:
+    def _handle_optimize(self, ctx: CycleContext, project: dict[str, Any]) -> State:
+        """OPTIMIZE state: dispatch inner loop or fall back to single RUN."""
+        assert ctx.hypothesis is not None and ctx.command is not None and ctx.exp_id is not None
+        search_space = ctx.hypothesis.get("search_space")
+        if not search_space:
+            return self._handle_run_single(ctx, project)
+
+        from .optimize import dispatch_optimize
+        self._emit(EventType.OPTIMIZE_STARTED, {
+            "exp_id": ctx.exp_id,
+            "hypothesis_id": ctx.hypothesis["id"],
+        })
+
+        try:
+            result = dispatch_optimize(project, ctx.command, ctx.hypothesis, self.project_dir, ctx.exp_id)
+        except OptimizeError as e:
+            log(f"OPTIMIZE: {ctx.exp_id} failed — {e}, falling back to single RUN")
+            return self._handle_run_single(ctx, project)
+
+        if result is None:
+            return self._handle_run_single(ctx, project)
+
+        ctx.optimize_result = result
+        ctx.new_metric = result.best_value
+        ctx.run_result = subprocess.CompletedProcess(
+            args="optimize", returncode=0,
+            stdout=result.best_stdout, stderr=result.best_stderr,
+        )
+
+        self._emit(EventType.OPTIMIZE_FINISHED, {
+            "exp_id": ctx.exp_id,
+            "n_trials": result.n_trials,
+            "best_value": result.best_value,
+            "total_seconds": round(result.total_seconds, 1),
+        })
+
+        return State.EVALUATE
+
+    def _handle_run_single(self, ctx: CycleContext, project: dict[str, Any]) -> State:
+        """Single experiment run (legacy path or no search_space)."""
         assert ctx.command is not None and ctx.exp_id is not None
-        run_type = project.get("run", {}).get("type", "surface")
+        run_type = project.get("run", {}).get("type", "command")
         log(f"RUN[{run_type}]: launching {ctx.exp_id}")
         try:
             ctx.run_result = dispatch_run(project, ctx.command, ctx.exp_id, self.project_dir)
@@ -268,10 +310,19 @@ class ResearchLoop:
         assert ctx.hypothesis is not None and ctx.exp_id is not None
         metric_name = project["metric"]["name"]
         baseline_metric = get_baseline_metric(self.project_dir, metric_name)
-        value = ctx.hypothesis["value"]
-        changed_var = ctx.hypothesis["lever"]
-        if isinstance(value, dict):
-            changed_var = "+".join(value.keys())
+
+        # v2 hypothesis (approach-based) vs v1 (lever-based)
+        if "approach" in ctx.hypothesis and "lever" not in ctx.hypothesis:
+            changed_var = ctx.hypothesis["approach"]
+            value = ctx.optimize_result.best_params if ctx.optimize_result else {}
+            config = ctx.optimize_result.best_params if ctx.optimize_result else {}
+        else:
+            value = ctx.hypothesis["value"]
+            changed_var = ctx.hypothesis["lever"]
+            if isinstance(value, dict):
+                changed_var = "+".join(value.keys())
+            config = {changed_var: value}
+
         entry = {
             "id": ctx.exp_id,
             "question": ctx.hypothesis["description"],
@@ -288,7 +339,21 @@ class ResearchLoop:
             },
             "decision": ctx.verdict.lower(),
             "notes": f"Command: {ctx.command}",
+            "hypothesis_id": ctx.hypothesis["id"],
+            "config": config,
+            "reasoning": ctx.hypothesis.get("reasoning", ""),
         }
+
+        # Include optimize_result in ledger for v2 hypotheses
+        if ctx.optimize_result is not None:
+            entry["optimize_result"] = {
+                "n_trials": ctx.optimize_result.n_trials,
+                "total_seconds": round(ctx.optimize_result.total_seconds, 1),
+                "best_params": ctx.optimize_result.best_params,
+                "best_value": ctx.optimize_result.best_value,
+            }
+            if "approach" in ctx.hypothesis:
+                entry["approach"] = ctx.hypothesis["approach"]
         append_ledger(self.project_dir, entry)
         self._emit(EventType.EXPERIMENT_DONE, {
             "exp_id": ctx.exp_id,
@@ -350,7 +415,7 @@ class ResearchLoop:
 
         project = load_project(self.project_dir)
         build_type = project.get("build", {}).get("type", "flag")
-        run_type = project.get("run", {}).get("type", "surface")
+        run_type = project.get("run", {}).get("type", "command")
         eval_type = project.get("evaluate", {}).get("type", "stdout_json")
         mode = "until-idle" if self.until_idle else "infinite"
         log(f"LOOP: mode={mode}")
@@ -364,7 +429,8 @@ class ResearchLoop:
             State.GENERATE: self._handle_generate,
             State.SELECT: self._handle_select,
             State.BUILD_COMMAND: self._handle_build_command,
-            State.RUN: self._handle_run,
+            State.RUN: self._handle_run_single,
+            State.OPTIMIZE: self._handle_optimize,
             State.EVALUATE: self._handle_evaluate,
             State.RECORD: self._handle_record,
         }

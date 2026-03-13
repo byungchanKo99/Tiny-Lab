@@ -117,6 +117,11 @@ def dispatch_build(
     build_type = project.get("build", {}).get("type", "flag")
 
     if build_type == "flag":
+        # v2 hypothesis with approach + search_space: return baseline command as-is
+        # (parameters will be injected by the optimizer)
+        if "approach" in hypothesis and "lever" not in hypothesis:
+            return project["baseline"]["command"].strip()
+
         value = hypothesis["value"]
         if isinstance(value, dict):
             # Multi-lever: validate each lever

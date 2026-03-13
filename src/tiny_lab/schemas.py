@@ -22,7 +22,20 @@ class ValidationError(ValueError):
 # ---------------------------------------------------------------------------
 
 HYPOTHESIS_ENTRY = {
-    "required": {"id": str, "status": str, "lever": str, "value": (str, int, float, dict), "description": str},
+    "required": {"id": str, "status": str, "description": str},
+    "optional": {
+        "reasoning": str,
+        # v1 fields (lever-based)
+        "lever": str,
+        "value": (str, int, float, dict),
+        # v2 fields (approach-based)
+        "approach": str,
+        "search_space": dict,
+        "code_changes": str,
+        "references": list,
+        "optimize_type": str,
+        "optimize_script": str,
+    },
     "enums": {"status": {"pending", "running", "done", "skipped"}},
 }
 
@@ -46,7 +59,11 @@ LEDGER_ENTRY = {
         "primary_metric": dict,
         "decision": str,
     },
-    "optional": {"value": (str, int, float, dict, type(None)), "control": str, "notes": str},
+    "optional": {
+        "value": (str, int, float, dict, type(None)), "control": str, "notes": str,
+        "hypothesis_id": str, "config": dict, "reasoning": str,
+        "optimize_result": dict, "approach": str,
+    },
     "enums": {"class": {"WIN", "LOSS", "INVALID", "INCONCLUSIVE", "BASELINE"}},
 }
 
@@ -145,8 +162,26 @@ def validate(data: Any, schema_name: str, *, strict: bool = True) -> list[str]:
 
 
 def validate_hypothesis_entry(entry: dict[str, Any], *, strict: bool = True) -> list[str]:
-    """Validate a single hypothesis entry."""
-    return validate(entry, "hypothesis_entry", strict=strict)
+    """Validate a single hypothesis entry.
+
+    Supports two formats:
+    - v1: lever + value (traditional flag-based)
+    - v2: approach + optional search_space (strategy-based)
+    At least one format must be present.
+    """
+    errors = validate(entry, "hypothesis_entry", strict=False)
+
+    # Cross-field validation: must have (lever + value) OR approach
+    if isinstance(entry, dict):
+        has_v1 = "lever" in entry and "value" in entry
+        has_v2 = "approach" in entry
+        if not has_v1 and not has_v2:
+            errors.append("Hypothesis must have either ('lever' + 'value') or 'approach'")
+
+    if errors and strict:
+        raise ValidationError(errors, "hypothesis_entry")
+
+    return errors
 
 
 def validate_eval_result(data: dict[str, Any], score_range: tuple[int, int] = (1, 10), *, strict: bool = True) -> list[str]:

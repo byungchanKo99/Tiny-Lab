@@ -26,8 +26,9 @@ Lifecycle:
   tiny-lab stop                          # graceful shutdown when done
 
 The loop is an INFINITE state machine:
-  CHECK_QUEUE → SELECT → BUILD → RUN → EVALUATE → RECORD → CHECK_QUEUE
+  CHECK_QUEUE → SELECT → BUILD → OPTIMIZE → EVALUATE → RECORD → CHECK_QUEUE
   When queue empties → GENERATE (AI creates new hypotheses) → CHECK_QUEUE
+  OPTIMIZE runs inner loop (optuna/grid/random) if search_space defined, else single RUN
 
 Environment variables:
   CYCLE_SLEEP     Seconds between experiment cycles (default: 30, recommend: 1)
@@ -399,14 +400,25 @@ def _format_board(data: dict[str, Any]) -> None:
 
     print(f"Project: {data['project']['name']}")
     print(f"Metric: {metric_name} (direction: {direction})")
-    print(f"Baseline {metric_name}: {baseline}")
+    baseline_cmd = data.get("baseline_command", "")
+    if baseline_cmd:
+        print(f"Baseline {metric_name}: {baseline} | {baseline_cmd}")
+    else:
+        print(f"Baseline {metric_name}: {baseline}")
     print()
 
     if best_row:
         bpm = best_row.get("primary_metric", {})
         value_display = _format_value(best_row.get("value"))
-        print(f"Best: {best_row['id']} — {metric_name}={bpm.get(metric_name)} (delta={bpm.get('delta_pct')}%) "
-              f"[{best_row.get('changed_variable')}={value_display}]")
+        best_line = f"Best: {best_row['id']} — {metric_name}={bpm.get(metric_name)} (delta={bpm.get('delta_pct')}%)"
+        if best_row.get("approach"):
+            best_line += f" [{best_row['approach']}]"
+        else:
+            best_line += f" [{best_row.get('changed_variable')}={value_display}]"
+        opt = best_row.get("optimize_result")
+        if opt:
+            best_line += f" ({opt.get('n_trials', '?')} trials, {opt.get('total_seconds', '?')}s)"
+        print(best_line)
     print()
 
     print("Results: " + ", ".join(f"{k}: {v}" for k, v in sorted(counts.items())))
@@ -415,14 +427,30 @@ def _format_board(data: dict[str, Any]) -> None:
 
     recent = ledger[-10:]
     if recent:
-        print(f"{'ID':<10} {'Verdict':<12} {metric_name:<15} {'Delta%':<10} {'Description'}")
-        print("-" * 80)
+        print(f"{'ID':<10} {'Verdict':<12} {metric_name:<15} {'Delta%':<10} {'Config':<30} {'Reasoning'}")
+        print("-" * 120)
         for row in recent:
             pm = row.get("primary_metric", {})
             val = pm.get(metric_name, "N/A")
             delta = pm.get("delta_pct", "N/A")
-            desc = row.get("question", "")[:40]
-            print(f"{row.get('id', '?'):<10} {row.get('class', '?'):<12} {str(val):<15} {str(delta):<10} {desc}")
+            # Config: use approach for v2, else ledger config dict, else changed_variable=value
+            if row.get("approach"):
+                config_str = row["approach"]
+                opt = row.get("optimize_result")
+                if opt:
+                    config_str += f" ({opt.get('n_trials', '?')}T, {opt.get('total_seconds', '?')}s)"
+            else:
+                config = row.get("config", {})
+                if config and "baseline_command" not in config:
+                    config_str = ", ".join(f"{k}={v}" for k, v in config.items())
+                elif row.get("changed_variable") and row.get("value"):
+                    config_str = f"{row['changed_variable']}={_format_value(row['value'])}"
+                else:
+                    config_str = ""
+            # Reasoning: use reasoning field, fallback to question
+            reasoning = row.get("reasoning", "") or row.get("question", "")
+            reasoning = reasoning[:60]
+            print(f"{row.get('id', '?'):<10} {row.get('class', '?'):<12} {str(val):<15} {str(delta):<10} {config_str:<30} {reasoning}")
     else:
         print("No experiments yet.")
 

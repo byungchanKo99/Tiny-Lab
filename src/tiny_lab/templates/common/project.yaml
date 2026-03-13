@@ -5,14 +5,13 @@ description: "Describe your experiment here"
 agent:
   provider: claude # claude | codex
 
-# lane: my-lane           # Optional: surface lane name
 # workdir: .              # Optional: working directory for commands
 
 build:
   type: flag # flag | script | code
 
 run:
-  type: command # surface | command | pipeline
+  type: command # command | pipeline
 
 evaluate:
   type: stdout_json # stdout_json | script | llm
@@ -34,6 +33,11 @@ levers:
 # calibration:
 #   wall_clock_minutes: 5
 #   max_total_seconds: 330
+
+# optimize:
+#   type: optuna          # optuna|grid|random|custom
+#   time_budget: 300      # seconds per hypothesis
+#   n_trials: null         # max trials (null = time-budget only)
 
 rules:
   - "Change command-line flags only"

@@ -50,3 +50,7 @@ def reports_dir(project_dir: Path) -> Path:
 
 def eval_result_path(project_dir: Path, exp_id: str) -> Path:
     return research_dir(project_dir) / f".eval_result_{exp_id}.json"
+
+
+def optimize_log_path(project_dir: Path, exp_id: str) -> Path:
+    return research_dir(project_dir) / f".optimize_{exp_id}.jsonl"

@@ -56,12 +56,17 @@ _HTML_TEMPLATE = """\
     <div class="stat">{best_metric}</div>
     <div class="stat-label">{best_desc}</div>
   </div>
+  <div class="card">
+    <h2>Baseline</h2>
+    <div class="stat">{baseline}</div>
+    <div class="stat-label">{baseline_command}</div>
+  </div>
 </div>
 
 <div class="card">
   <h2>Experiment Log</h2>
   <table>
-    <thead><tr><th>ID</th><th>Verdict</th><th>{metric_name}</th><th>Delta%</th><th>Lever</th><th>Value</th><th>Description</th></tr></thead>
+    <thead><tr><th>ID</th><th>Verdict</th><th>{metric_name}</th><th>Delta%</th><th>Config</th><th>Reasoning</th></tr></thead>
     <tbody id="logBody"></tbody>
   </table>
 </div>
@@ -129,13 +134,48 @@ const tbody = document.getElementById('logBody');
 DATA.ledger.slice().reverse().forEach(r => {{
   const pm = r.primary_metric || {{}};
   const cls = (r.class || '').toLowerCase();
-  const val = typeof r.value === 'object' ? Object.entries(r.value).map(([k,v]) => k+'='+v).join(', ') : (r.value || '');
+  const cfg = r.config && !r.config.baseline_command
+    ? Object.entries(r.config).map(([k,v]) => k+'='+v).join(', ')
+    : (r.changed_variable ? r.changed_variable + '=' + (typeof r.value === 'object' ? Object.entries(r.value).map(([k,v]) => k+'='+v).join(', ') : (r.value || '')) : '');
+  const reasoning = (r.reasoning || r.question || '').slice(0, 80);
   tbody.innerHTML += `<tr>
     <td>${{r.id}}</td><td class="${{cls}}">${{r.class}}</td>
     <td>${{pm[DATA.metric_name] ?? 'N/A'}}</td><td>${{pm.delta_pct ?? 'N/A'}}</td>
-    <td>${{r.changed_variable || ''}}</td><td>${{val}}</td>
-    <td>${{(r.question || '').slice(0, 60)}}</td></tr>`;
+    <td>${{cfg}}</td>
+    <td>${{reasoning}}</td></tr>`;
 }});
+
+// Optimization Trials convergence (for experiments with optimize_result)
+const optExps = DATA.ledger.filter(r => r.optimize_result && r.optimize_result.n_trials > 1);
+if (optExps.length > 0) {{
+  const optDiv = document.createElement('div');
+  optDiv.className = 'card';
+  optDiv.style.marginTop = '1.5rem';
+  optDiv.innerHTML = '<h2>Optimization Summary</h2><table><thead><tr><th>Experiment</th><th>Approach</th><th>Trials</th><th>Time (s)</th><th>Best Value</th><th>Best Params</th></tr></thead><tbody id="optBody"></tbody></table>';
+  document.body.appendChild(optDiv);
+  const optBody = document.getElementById('optBody');
+  optExps.forEach(r => {{
+    const opt = r.optimize_result;
+    const params = opt.best_params ? Object.entries(opt.best_params).map(([k,v]) => k+'='+v).join(', ') : '';
+    optBody.innerHTML += `<tr><td>${{r.id}}</td><td>${{r.approach || r.changed_variable || '?'}}</td><td>${{opt.n_trials}}</td><td>${{opt.total_seconds}}</td><td>${{opt.best_value ?? 'N/A'}}</td><td>${{params}}</td></tr>`;
+  }});
+}}
+
+// Generation History
+if (DATA.gen_history && DATA.gen_history.length > 0) {{
+  const ghDiv = document.createElement('div');
+  ghDiv.className = 'card';
+  ghDiv.style.marginTop = '1.5rem';
+  ghDiv.innerHTML = '<h2>Generation History</h2><table><thead><tr><th>Timestamp</th><th>State</th><th>Added</th><th>Reasoning</th><th>Changes</th><th>References</th></tr></thead><tbody id="ghBody"></tbody></table>';
+  document.body.appendChild(ghDiv);
+  const ghBody = document.getElementById('ghBody');
+  DATA.gen_history.slice().reverse().forEach(e => {{
+    const ts = (e.timestamp || '').slice(0, 19);
+    const refs = (e.references || []).join(', ');
+    const changes = (e.changes_made || []).join('; ');
+    ghBody.innerHTML += `<tr><td>${{ts}}</td><td>${{e.state || '?'}}</td><td>${{e.hypotheses_added_count || 0}}</td><td>${{(e.reasoning || '').slice(0, 80)}}</td><td>${{changes}}</td><td>${{refs}}</td></tr>`;
+  }});
+}}
 </script>
 </body>
 </html>"""
@@ -160,13 +200,17 @@ def generate_html_report(data: dict[str, Any], output_path: Path) -> None:
         "baseline": data["baseline"],
         "counts": data["counts"],
         "ledger": data["ledger"],
+        "gen_history": data.get("gen_history", []),
     }, ensure_ascii=False)
+
+    baseline_command = data.get("baseline_command", "")
 
     html = _HTML_TEMPLATE.format(
         title=data["project"]["name"],
         metric_name=metric_name,
         direction=data["direction"],
         baseline=data["baseline"],
+        baseline_command=baseline_command or "N/A",
         total=len(data["ledger"]),
         best_metric=best_metric,
         best_desc=best_desc,

@@ -17,18 +17,34 @@ from tiny_lab.schemas import (
 # ---------------------------------------------------------------------------
 
 class TestValidateHypothesisEntry:
-    def test_valid_entry(self):
+    def test_valid_v1_entry(self):
         entry = {"id": "H-1", "status": "pending", "lever": "lr", "value": 0.01, "description": "test"}
         assert validate_hypothesis_entry(entry, strict=False) == []
 
-    def test_valid_entry_string_value(self):
+    def test_valid_v1_entry_string_value(self):
         entry = {"id": "H-2", "status": "done", "lever": "algo", "value": "sgd", "description": "test"}
         assert validate_hypothesis_entry(entry, strict=False) == []
+
+    def test_valid_v2_entry(self):
+        entry = {
+            "id": "H-10", "status": "pending", "approach": "xgboost_stacking",
+            "description": "XGBoost+LightGBM stacking",
+            "search_space": {"lr": {"type": "float", "low": 0.001, "high": 0.3}},
+        }
+        assert validate_hypothesis_entry(entry, strict=False) == []
+
+    def test_valid_v2_entry_minimal(self):
+        entry = {"id": "H-11", "status": "pending", "approach": "random_forest", "description": "RF baseline"}
+        assert validate_hypothesis_entry(entry, strict=False) == []
+
+    def test_missing_both_lever_and_approach(self):
+        entry = {"id": "H-1", "status": "pending", "description": "test"}
+        errors = validate_hypothesis_entry(entry, strict=False)
+        assert any("lever" in e or "approach" in e for e in errors)
 
     def test_missing_required_field(self):
         entry = {"id": "H-1", "status": "pending", "lever": "lr"}
         errors = validate_hypothesis_entry(entry, strict=False)
-        assert any("value" in e for e in errors)
         assert any("description" in e for e in errors)
 
     def test_invalid_status_enum(self):
@@ -48,6 +64,17 @@ class TestValidateHypothesisEntry:
     def test_non_dict_input(self):
         errors = validate_hypothesis_entry("not a dict", strict=False)
         assert errors
+
+    def test_v2_with_optional_fields(self):
+        entry = {
+            "id": "H-12", "status": "pending", "approach": "xgboost",
+            "description": "XGBoost with custom script",
+            "search_space": {"lr": {"type": "float", "low": 0.001, "high": 0.1}},
+            "optimize_type": "grid",
+            "references": ["paper-X"],
+            "code_changes": "modify train.py to use XGBoost",
+        }
+        assert validate_hypothesis_entry(entry, strict=False) == []
 
 
 # ---------------------------------------------------------------------------

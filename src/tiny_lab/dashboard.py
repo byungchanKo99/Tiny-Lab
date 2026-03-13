@@ -104,12 +104,19 @@ def build_board_data(project_dir: Path) -> dict[str, Any] | None:
         s = h.get("status", "unknown")
         queue_counts[s] = queue_counts.get(s, 0) + 1
 
+    # Extract baseline command from ledger or project config
+    baseline_command = project.get("baseline", {}).get("command", "")
+    baseline_entry = next((r for r in ledger if r.get("class") == "BASELINE"), None)
+    if baseline_entry and baseline_entry.get("config", {}).get("baseline_command"):
+        baseline_command = baseline_entry["config"]["baseline_command"]
+
     return {
         "project": project,
         "metric_name": metric_name,
         "direction": direction,
         "ledger": ledger,
         "baseline": baseline,
+        "baseline_command": baseline_command,
         "best_row": best_row,
         "counts": counts,
         "queue_counts": queue_counts,

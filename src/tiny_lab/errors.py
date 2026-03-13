@@ -16,3 +16,7 @@ class RunError(TinyLabError):
 
 class EvaluateError(TinyLabError):
     """Raised when EVALUATE phase fails."""
+
+
+class OptimizeError(TinyLabError):
+    """Raised when OPTIMIZE phase fails."""
