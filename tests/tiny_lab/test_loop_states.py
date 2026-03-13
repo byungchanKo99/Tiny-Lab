@@ -127,6 +127,22 @@ class TestHandleSelect:
         assert loop._handle_select(ctx, project) == State.CHECK_QUEUE
 
 
+    def test_invalid_hypothesis_skipped_with_log(self, loop: ResearchLoop, project_dir: Path):
+        """Hypothesis with wrong fields (e.g. changed_variable instead of lever) is skipped."""
+        _add_hypotheses(project_dir, [
+            {"id": "H-bad", "status": "pending", "changed_variable": "model", "value": "xgb", "description": "test"},
+        ])
+        project = _load_project(project_dir)
+        ctx = CycleContext()
+        state = loop._handle_select(ctx, project)
+        assert state == State.CHECK_QUEUE  # skipped, not BUILD_COMMAND
+        assert ctx.hypothesis is None
+
+        # Verify it was marked as skipped
+        queue = yaml.safe_load((project_dir / "research" / "hypothesis_queue.yaml").read_text())
+        assert queue["hypotheses"][0]["status"] == "skipped"
+
+
 class TestHandleBuildCommand:
     def test_successful_flag_build(self, loop: ResearchLoop, project_dir: Path):
         project = _load_project(project_dir)

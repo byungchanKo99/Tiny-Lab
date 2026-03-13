@@ -217,11 +217,23 @@ class ResearchLoop:
         return State.CHECK_QUEUE
 
     def _handle_select(self, ctx: CycleContext, project: dict[str, Any]) -> State:
+        from .schemas import validate_hypothesis_entry
         queue = load_queue(self.project_dir)
         pending = pending_hypotheses(queue)
         if not pending:
             return State.CHECK_QUEUE
         ctx.hypothesis = pending[0]
+
+        # Validate hypothesis format before proceeding
+        errors = validate_hypothesis_entry(ctx.hypothesis, strict=False)
+        if errors:
+            log(f"SELECT: INVALID hypothesis {ctx.hypothesis.get('id', '?')}: {errors}")
+            log(f"SELECT: hypothesis must have ('lever' + 'value') or 'approach'. "
+                f"Got keys: {list(ctx.hypothesis.keys())}")
+            self._mark_hypothesis(ctx.hypothesis, "skipped")
+            ctx.reset_experiment()
+            return State.CHECK_QUEUE
+
         ctx.hypothesis["status"] = "running"
         save_queue(self.project_dir, queue)
         log(f"SELECT: {ctx.hypothesis['id']} -- {ctx.hypothesis['description']}")

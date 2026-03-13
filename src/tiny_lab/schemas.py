@@ -176,7 +176,12 @@ def validate_hypothesis_entry(entry: dict[str, Any], *, strict: bool = True) -> 
         has_v1 = "lever" in entry and "value" in entry
         has_v2 = "approach" in entry
         if not has_v1 and not has_v2:
-            errors.append("Hypothesis must have either ('lever' + 'value') or 'approach'")
+            hint = ""
+            if "changed_variable" in entry:
+                hint = " (use 'lever' not 'changed_variable')"
+            elif "command" in entry:
+                hint = " (don't include 'command' — it's built from lever+value)"
+            errors.append(f"Hypothesis must have either ('lever' + 'value') or 'approach'{hint}")
 
     if errors and strict:
         raise ValidationError(errors, "hypothesis_entry")

@@ -122,6 +122,21 @@ def dispatch_build(
         if "approach" in hypothesis and "lever" not in hypothesis:
             return project["baseline"]["command"].strip()
 
+        # Validate required fields with helpful error messages
+        if "lever" not in hypothesis:
+            hint = ""
+            if "changed_variable" in hypothesis:
+                hint = " (did you mean 'lever' instead of 'changed_variable'?)"
+            raise BuildError(
+                f"Hypothesis {hypothesis.get('id', '?')} missing 'lever' field{hint}. "
+                f"v1 format requires 'lever' + 'value'. v2 requires 'approach'."
+            )
+        if "value" not in hypothesis:
+            raise BuildError(
+                f"Hypothesis {hypothesis.get('id', '?')} missing 'value' field. "
+                f"v1 format requires 'lever' + 'value'."
+            )
+
         value = hypothesis["value"]
         if isinstance(value, dict):
             # Multi-lever: validate each lever
