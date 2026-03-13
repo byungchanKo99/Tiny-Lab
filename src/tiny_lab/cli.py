@@ -55,6 +55,8 @@ Key files (in research/):
     )
     init_parser.add_argument("--global", dest="global_install", action="store_true",
                              help="Also install /research slash command to ~/.claude/ (Claude only)")
+    init_parser.add_argument("--update", action="store_true",
+                             help="Overwrite existing template files (backs up to .bak first)")
 
     run_parser = sub.add_parser(
         "run",
@@ -137,7 +139,7 @@ Key files (in research/):
         return
 
     if args.command == "init":
-        cmd_init(project_dir, global_install=args.global_install)
+        cmd_init(project_dir, global_install=args.global_install, update=args.update)
     elif args.command == "discover":
         cmd_discover(project_dir, " ".join(args.intent) if args.intent else "")
     elif args.command == "board":
@@ -159,7 +161,7 @@ def _templates_dir() -> Path:
     return Path(__file__).parent / "templates"
 
 
-def cmd_init(project_dir: Path, *, global_install: bool = False) -> None:
+def cmd_init(project_dir: Path, *, global_install: bool = False, update: bool = False) -> None:
     """Initialize a new experiment project."""
     from .providers import detect_provider, get_provider
 
@@ -169,13 +171,22 @@ def cmd_init(project_dir: Path, *, global_install: bool = False) -> None:
 
     created = []
     skipped = []
+    updated = []
 
     for src_rel, dst_rel in provider.get_template_files():
         src = templates / src_rel
         dst = project_dir / dst_rel
 
         if dst.exists():
-            skipped.append(dst_rel)
+            if update:
+                backup = dst.with_suffix(dst.suffix + ".bak")
+                shutil.copy2(dst, backup)
+                shutil.copy2(src, dst)
+                if dst_rel.endswith(".sh"):
+                    dst.chmod(dst.stat().st_mode | 0o111)
+                updated.append(dst_rel)
+            else:
+                skipped.append(dst_rel)
             continue
 
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -187,6 +198,10 @@ def cmd_init(project_dir: Path, *, global_install: bool = False) -> None:
     if created:
         print("Created:")
         for f in created:
+            print(f"  {f}")
+    if updated:
+        print("Updated (backup → .bak):")
+        for f in updated:
             print(f"  {f}")
     if skipped:
         print("Skipped (already exists):")

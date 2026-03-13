@@ -16,5 +16,9 @@ def load_project(project_dir: Path) -> dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(f"project.yaml not found at {path}")
     data = yaml.safe_load(path.read_text())
+    # Auto-migrate old schema versions
+    from .migrate import needs_migration, migrate_and_save
+    if needs_migration(data):
+        data = migrate_and_save(data, path)
     validate_project_deep(data)
     return data

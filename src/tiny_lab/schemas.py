@@ -54,6 +54,7 @@ PROJECT_CONFIG = {
     "required": {"name": str, "baseline": dict, "metric": dict, "levers": dict},
     "optional": {
         "description": str, "build": dict, "run": dict, "evaluate": dict,
+        "schema_version": int,
         "lane": str, "workdir": str, "calibration": dict, "rules": list,
         "immutable_files": list,
     },

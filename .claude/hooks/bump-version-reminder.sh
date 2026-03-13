@@ -29,3 +29,12 @@ msg = 'src/tiny_lab/ 코드가 변경되었지만 pyproject.toml의 version이 �
 print(json.dumps({'decision': 'block', 'reason': msg}))
 "
 fi
+
+# __init__.py에 하드코딩된 버전이 있으면 경고
+if grep -q '__version__\s*=\s*"[0-9]' "$PROJ/src/tiny_lab/__init__.py" 2>/dev/null; then
+    python3 -c "
+import json
+msg = '__init__.py에 하드코딩된 버전이 있습니다. importlib.metadata를 사용하세요.'
+print(json.dumps({'decision': 'block', 'reason': msg}))
+"
+fi
