@@ -1,7 +1,8 @@
 """Tiny Lab — Deterministic AI-driven research loop for experiments."""
 
+from importlib.metadata import version, PackageNotFoundError
+
 try:
-    from importlib.metadata import version
     __version__ = version("tiny-lab")
-except Exception:
-    __version__ = "0.0.0-dev"
+except PackageNotFoundError:
+    __version__ = version(__name__)
