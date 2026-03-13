@@ -324,6 +324,8 @@ Which metric do you want to optimize? Are these the right levers?
 
    **If `optimize:` is configured in project.yaml → use v2 format:**
 
+   Parameter types are already defined in `project.yaml` `search_space:`. Hypotheses only pick the approach — do NOT repeat search_space per hypothesis.
+
    ```yaml
    hypotheses:
      - id: H-001
@@ -331,20 +333,14 @@ Which metric do you want to optimize? Are these the right levers?
        approach: logistic_regression
        description: "Logistic Regression baseline for interpretability"
        reasoning: "Start with a simple linear model before trying complex approaches"
-       search_space:
-         C: { type: float, low: 0.01, high: 10, log: true }
-         max_iter: { type: int, low: 100, high: 1000 }
      - id: H-002
        status: pending
        approach: random_forest
        description: "Random Forest with tree depth search"
        reasoning: "Nonlinear model to capture feature interactions"
-       search_space:
-         n_estimators: { type: int, low: 50, high: 500 }
-         max_depth: { type: int, low: 3, high: 20 }
    ```
 
-   v2 key principle: YOU pick the **strategy** (approach), the **optimizer** picks the **parameters**. Don't specify exact values — specify search ranges.
+   v2 key principle: YOU pick the **strategy** (approach), the **optimizer** picks the **parameters** from `project.yaml` `search_space:`. Same approach + different ranges is NOT a new hypothesis.
 
    **Otherwise → use v1 format:**
 

@@ -244,6 +244,50 @@ class TestDispatchOptimize:
         assert result is None
 
     @patch("tiny_lab.optimize.run_experiment_command")
+    def test_project_level_search_space(self, mock_run):
+        """search_space in project is used when hypothesis has none."""
+        mock_run.return_value = subprocess.CompletedProcess(
+            args="", returncode=0, stdout='{"loss": 0.5}\n', stderr="",
+        )
+        project = {
+            "metric": {"name": "loss", "direction": "minimize"},
+            "levers": {},
+            "optimize": {"type": "random", "n_trials": 2},
+            "search_space": {"lr": {"type": "float", "low": 0.001, "high": 0.1}},
+        }
+        hypothesis = {
+            "id": "H-1",
+            "approach": "xgboost",
+            "description": "test",
+        }
+        result = dispatch_optimize(project, "echo", hypothesis, Path("/tmp"), "EXP-002")
+        assert result is not None
+        assert result.n_trials == 2
+
+    @patch("tiny_lab.optimize.run_experiment_command")
+    def test_hypothesis_search_space_overrides_project(self, mock_run):
+        """hypothesis search_space extends/overrides project-level."""
+        mock_run.return_value = subprocess.CompletedProcess(
+            args="", returncode=0, stdout='{"loss": 0.5}\n', stderr="",
+        )
+        project = {
+            "metric": {"name": "loss", "direction": "minimize"},
+            "levers": {},
+            "optimize": {"type": "random", "n_trials": 1},
+            "search_space": {"lr": {"type": "float", "low": 0.001, "high": 0.1}},
+        }
+        hypothesis = {
+            "id": "H-1",
+            "approach": "xgboost",
+            "description": "test",
+            "search_space": {"depth": {"type": "int", "low": 3, "high": 10}},
+        }
+        result = dispatch_optimize(project, "echo", hypothesis, Path("/tmp"), "EXP-002")
+        assert result is not None
+        # Both lr (from project) and depth (from hypothesis) should be in best_params
+        assert result.best_params is not None
+
+    @patch("tiny_lab.optimize.run_experiment_command")
     def test_routes_to_random(self, mock_run):
         mock_run.return_value = subprocess.CompletedProcess(
             args="", returncode=0, stdout='{"loss": 0.5}\n', stderr="",

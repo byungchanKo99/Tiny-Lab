@@ -218,7 +218,9 @@ There are two hypothesis formats. Use **v2** when `optimize:` is configured in p
 
 Required fields: `id`, `status`, `lever`, `value`, `description`.
 
-#### v2 — Strategic approach + search space (when `optimize:` is configured)
+#### v2 — Strategic approach (when `optimize:` is configured)
+
+Parameter types are defined once in `project.yaml` under `search_space:`. Hypotheses only pick the approach.
 
 ```yaml
 - id: H-001
@@ -226,18 +228,16 @@ Required fields: `id`, `status`, `lever`, `value`, `description`.
   approach: logistic_regression
   description: "Logistic Regression baseline for interpretability"
   reasoning: "Simple linear model as baseline before trying nonlinear approaches"
-  search_space:
-    C: { type: float, low: 0.01, high: 10, log: true }
-    max_iter: { type: int, low: 100, high: 1000 }
 ```
 
 Required fields: `id`, `status`, `approach`, `description`.
-Optional: `search_space`, `reasoning`, `code_changes`, `references`, `optimize_type`.
+Optional: `search_space` (only for approach-specific params not in project.yaml), `reasoning`, `code_changes`, `references`, `optimize_type`.
 
-**Key principle:** In v2, YOU decide the **strategy** (approach), the **optimizer** decides the **parameters**. Don't specify exact values — specify ranges for the optimizer to search.
+**Key principle:** YOU decide the **strategy** (approach), the **optimizer** decides the **parameters**. Parameter types and ranges are defined in `project.yaml` `search_space:`, not per hypothesis.
 
-- DO: `approach: xgboost_ensemble` + `search_space: {n_estimators: {type: int, low: 50, high: 500}}`
-- DON'T: `lever: n_estimators, value: "200"` (this is the optimizer's job)
+- DO: `approach: xgboost_stacking` (optimizer uses project-level search_space)
+- DON'T: Define search_space per hypothesis unless adding approach-specific params
+- NEVER: Same approach + different ranges = NOT a new hypothesis
 
 Valid statuses: `pending`, `running`, `done`, `skipped`.
 
@@ -249,6 +249,8 @@ The `research/project.yaml` file controls the experiment. Key sections:
 - **metric.name** — which metric to extract from stdout JSON
 - **metric.direction** — `minimize` or `maximize`
 - **levers** — each lever has a `flag`, `baseline` value, and `space` of values to try
+- **search_space** — parameter type definitions for the optimizer (type, range, choices)
+- **optimize** — optimizer config (type, time_budget, n_trials)
 - **build.type** — `flag` (replace CLI flags), `script` (predefined scripts), `code` (AI modifies source)
 - **run.type** — `command` (direct shell), `pipeline` (multi-step)
 - **evaluate.type** — `stdout_json` (parse stdout), `script` (run eval script), `llm` (AI scoring)

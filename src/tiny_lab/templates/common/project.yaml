@@ -39,6 +39,12 @@ levers:
 #   time_budget: 300      # seconds per hypothesis
 #   n_trials: null         # max trials (null = time-budget only)
 
+# search_space:           # Parameter type definitions — optimizer searches within these
+#   lr: {type: float, low: 0.001, high: 1.0, log: true}
+#   max_depth: {type: int, low: 1, high: 30}
+#   n_estimators: {type: int, low: 50, high: 1000}
+#   algorithm: {type: categorical, choices: [sgd, adam, rmsprop]}
+
 rules:
   - "Change command-line flags only"
   - "Do not install packages"

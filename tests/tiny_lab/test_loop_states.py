@@ -204,6 +204,30 @@ class TestHandleOptimize:
         assert ctx.new_metric == 0.3
         assert ctx.run_result is not None
 
+    @patch("tiny_lab.optimize.dispatch_optimize")
+    def test_project_level_search_space_triggers_optimizer(self, mock_opt, loop: ResearchLoop, project_dir: Path):
+        """v2 hypothesis without search_space uses project-level search_space."""
+        from tiny_lab.optimize import OptimizeResult
+        mock_opt.return_value = OptimizeResult(
+            best_value=0.4, best_params={"lr": 0.01},
+            n_trials=3, total_seconds=5.0,
+            best_stdout='{"loss": 0.4}\n', best_stderr="",
+        )
+        # Add search_space to project.yaml
+        project = _load_project(project_dir)
+        project["search_space"] = {"lr": {"type": "float", "low": 0.001, "high": 0.1}}
+        (project_dir / "research" / "project.yaml").write_text(yaml.dump(project))
+        project = _load_project(project_dir)
+
+        ctx = CycleContext(
+            hypothesis={"id": "H-10", "approach": "xgboost", "description": "test"},
+            command="echo test", exp_id="EXP-002",
+        )
+        state = loop._handle_optimize(ctx, project)
+        assert state == State.EVALUATE
+        assert ctx.optimize_result is not None
+        mock_opt.assert_called_once()
+
     @patch("tiny_lab.optimize.dispatch_optimize", side_effect=OptimizeError("fail"))
     def test_optimizer_error_falls_back(self, mock_opt, loop: ResearchLoop, project_dir: Path):
         """OptimizeError falls back to single RUN."""

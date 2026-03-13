@@ -498,7 +498,10 @@ def dispatch_optimize(
 
     Returns None if no search_space is defined.
     """
-    search_space_raw = hypothesis.get("search_space")
+    # Hypothesis-level search_space overrides/extends project-level
+    project_space = project.get("search_space", {})
+    hypothesis_space = hypothesis.get("search_space", {})
+    search_space_raw = {**project_space, **hypothesis_space}
     if not search_space_raw:
         return None
 

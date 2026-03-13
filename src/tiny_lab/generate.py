@@ -270,18 +270,20 @@ STEP 3: ACT BASED ON STATE
 
 STEP 4: GENERATE HYPOTHESES
 
+Parameter types (search_space) are defined in project.yaml — the optimizer uses them automatically.
+You focus on WHICH APPROACH to try, not which parameters to tune.
+
 Each hypothesis MUST have:
 - id: H-{{next number}}
 - status: pending
 - approach: "{{algorithm/method name}}"
 - description: "{{what you're trying and why}}"
 - reasoning: "{{cite technique, paper, prior experiment}}"
-- search_space: {{param_name: {{type: int|float|categorical, low:, high:, choices:, ...}}}}
 
 Optional:
+- search_space: {{extra params specific to this approach, not already in project.yaml}}
 - code_changes: "description of script changes needed" (triggers BUILD[code])
 - optimize_type: "optuna|grid|random|custom" (override project default)
-- optimize_script: "path/to/script" (for custom optimizer)
 - references: ["papers", "URLs"]
 
 Example:
@@ -290,12 +292,13 @@ Example:
   approach: "xgboost_stacking"
   description: "XGBoost+LightGBM stacking ensemble"
   reasoning: "Stacking often outperforms individual models (Wolpert, 1992). Top 3 approaches were XGB, LGB, RF."
-  search_space:
-    lr: {{type: float, low: 0.001, high: 0.3, log: true}}
-    n_estimators: {{type: int, low: 50, high: 500}}
-    max_depth: {{type: int, low: 3, high: 10}}
 
-ANTI-PATTERN: All hypotheses exploring the same approach with different search spaces.
+CRITICAL RULES:
+- Do NOT define search_space per hypothesis unless the approach needs params NOT in project.yaml
+- Same approach + different parameter ranges = NOT a new hypothesis (optimizer handles ranges)
+- Each hypothesis = a fundamentally different strategy/algorithm
+
+ANTI-PATTERN: Multiple hypotheses for the same approach with different search_space ranges.
 GOOD PATTERN: Each hypothesis tries a fundamentally different approach.
 
 STEP 5: WRITE GENERATION SUMMARY

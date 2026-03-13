@@ -244,7 +244,7 @@ class ResearchLoop:
     def _handle_optimize(self, ctx: CycleContext, project: dict[str, Any]) -> State:
         """OPTIMIZE state: dispatch inner loop or fall back to single RUN."""
         assert ctx.hypothesis is not None and ctx.command is not None and ctx.exp_id is not None
-        search_space = ctx.hypothesis.get("search_space")
+        search_space = ctx.hypothesis.get("search_space") or project.get("search_space")
         if not search_space:
             return self._handle_run_single(ctx, project)
 
