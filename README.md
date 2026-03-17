@@ -3,12 +3,21 @@
 Deterministic AI-driven research loop. Define approaches, set a metric, and let the loop run experiments automatically.
 
 ```
-┌─ CHECK_QUEUE ──→ SELECT ──→ BUILD ──→ OPTIMIZE ──→ EVALUATE ──→ RECORD ─┐
-│                                          │                                │
-│                         search_space? → grid/random/custom optimizer      │
-│                         no search_space? → single run                     │
-│  (queue empty + infinite mode)                                            │
-└──→ GENERATE (AI pipeline: research→analyze→diagnose→hypotheses→summary) ──┘
+┌─ OUTER LOOP (LLM picks strategy) ─────────────────────────────────────────┐
+│                                                                            │
+│  CHECK_QUEUE → SELECT → BUILD                                              │
+│                           ↓                                                │
+│              ┌─ INNER LOOP (optimizer tunes params) ──┐                    │
+│              │  search_space defined?                  │                    │
+│              │  YES → grid | random | custom optimizer │                    │
+│              │  NO  → single run (no tuning needed)   │                    │
+│              └────────────────────────────────────────┘                    │
+│                           ↓                                                │
+│                     EVALUATE → RECORD → back to CHECK_QUEUE                │
+│                                                                            │
+│  Queue empty? → GENERATE pipeline                                          │
+│    research → analyze → diagnose → hypotheses → summary                    │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Install
