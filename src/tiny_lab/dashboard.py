@@ -52,10 +52,13 @@ def build_status_data(project_dir: Path) -> dict[str, Any]:
     # Queue stats
     queue_counts: dict[str, int] = {}
     if _queue_path.exists():
-        qdata = yaml.safe_load(_queue_path.read_text()) or {}
-        for h in qdata.get("hypotheses", []):
-            s = h.get("status", "unknown")
-            queue_counts[s] = queue_counts.get(s, 0) + 1
+        try:
+            qdata = yaml.safe_load(_queue_path.read_text()) or {}
+            for h in qdata.get("hypotheses", []):
+                s = h.get("status", "unknown")
+                queue_counts[s] = queue_counts.get(s, 0) + 1
+        except yaml.YAMLError:
+            queue_counts["error"] = -1  # signal corrupt queue
     data["queue"] = queue_counts
 
     # Recent ledger entries

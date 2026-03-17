@@ -12,6 +12,32 @@ from .queue import load_queue, save_queue, pending_hypotheses
 from .schemas import validate_hypothesis_entry, ValidationError
 
 
+def _sanitize_queue_yaml(project_dir: Path) -> None:
+    """Re-save queue through yaml.dump to fix YAML-unsafe text from AI.
+
+    AI agents often write reasoning fields with unquoted colons, which
+    breaks YAML parsing. Loading and re-saving through yaml.dump quotes
+    all strings properly.
+    """
+    from .paths import queue_path
+    path = queue_path(project_dir)
+    if not path.exists():
+        return
+    try:
+        import yaml
+        data = yaml.safe_load(path.read_text())
+        if data and "hypotheses" in data:
+            # Re-save through yaml.dump — this quotes all unsafe strings
+            path.write_text(yaml.dump(data, default_flow_style=False, allow_unicode=True))
+    except yaml.YAMLError:
+        log("GENERATE: queue YAML is corrupt after AI write, restoring from backup")
+        backup = path.with_suffix(path.suffix + ".bak")
+        if backup.exists():
+            import shutil
+            shutil.copy2(backup, path)
+            log("GENERATE: restored queue from backup")
+
+
 def _validate_new_entries(
     before: list[dict[str, Any]],
     after: list[dict[str, Any]],
@@ -448,6 +474,10 @@ def generate_hypotheses(project: dict[str, Any], project_dir: Path, provider: An
     except RuntimeError as e:
         log(f"GENERATE: {e}")
         return False
+
+    # Sanitize YAML: AI may have written unquoted colons or other YAML-unsafe text.
+    # Re-save through yaml.dump to ensure valid YAML.
+    _sanitize_queue_yaml(project_dir)
 
     # Validate new entries
     after = load_queue(project_dir)
