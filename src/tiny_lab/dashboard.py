@@ -204,6 +204,86 @@ def build_board_data(project_dir: Path) -> dict[str, Any] | None:
         else:
             row["_best_params_str"] = ""
 
+    # --- Insights ---
+    insights: dict[str, Any] = {}
+    non_baseline = [r for r in ledger if r.get("class") != "BASELINE"]
+
+    # Experiment rate & timing
+    if len(non_baseline) >= 2:
+        from .events import load_events as _load_events
+        events = _load_events(project_dir, last_n=999)
+        done_events = [e for e in events if e.get("event") == "experiment_done"]
+        if len(done_events) >= 2:
+            from datetime import datetime
+            try:
+                first_ts = datetime.fromisoformat(done_events[0]["timestamp"])
+                last_ts = datetime.fromisoformat(done_events[-1]["timestamp"])
+                elapsed = (last_ts - first_ts).total_seconds()
+                if elapsed > 0:
+                    rate = len(done_events) / (elapsed / 3600)
+                    insights["experiments_per_hour"] = round(rate, 1)
+                    insights["total_elapsed_minutes"] = round(elapsed / 60, 1)
+            except (KeyError, ValueError):
+                pass
+
+    # Total optimizer trials
+    total_trials = sum(r.get("optimize_result", {}).get("n_trials", 0) for r in ledger)
+    total_opt_seconds = sum(r.get("optimize_result", {}).get("total_seconds", 0) for r in ledger)
+    insights["total_optimizer_trials"] = total_trials
+    insights["total_optimizer_seconds"] = round(total_opt_seconds, 1)
+
+    # Pending queue + ETA
+    pending_count = queue_counts.get("pending", 0)
+    insights["pending_count"] = pending_count
+    if pending_count > 0 and insights.get("experiments_per_hour"):
+        eta_hours = pending_count / insights["experiments_per_hour"]
+        insights["eta_minutes"] = round(eta_hours * 60, 1)
+
+    # Convergence: experiments since last best
+    if best_row and non_baseline:
+        best_idx = next((i for i, r in enumerate(non_baseline) if r.get("id") == best_row.get("id")), None)
+        if best_idx is not None:
+            insights["experiments_since_best"] = len(non_baseline) - 1 - best_idx
+
+    # Recent trend (last 5 metric values)
+    recent_vals = []
+    for r in non_baseline[-5:]:
+        v = r.get("primary_metric", {}).get(metric_name)
+        if v is not None:
+            recent_vals.append(v)
+    if len(recent_vals) >= 2:
+        if direction == "maximize":
+            improving = recent_vals[-1] > recent_vals[0]
+        else:
+            improving = recent_vals[-1] < recent_vals[0]
+        insights["recent_trend"] = "improving" if improving else "plateaued"
+        insights["recent_values"] = recent_vals
+
+    # Next pending hypothesis
+    pending = [h for h in queue if h.get("status") == "pending"]
+    if pending:
+        nxt = pending[0]
+        insights["next_hypothesis"] = {
+            "id": nxt.get("id"),
+            "approach": nxt.get("approach", nxt.get("lever", "")),
+            "description": nxt.get("description", "")[:80],
+        }
+
+    # Approaches not yet tried
+    tried_approaches = set()
+    for r in non_baseline:
+        a = r.get("approach") or r.get("changed_variable")
+        if a:
+            tried_approaches.add(a)
+    search_sp = project.get("search_space", {})
+    if search_sp:
+        # If there are categorical params with model choices
+        for param, spec in search_sp.items():
+            if isinstance(spec, dict) and spec.get("type") == "categorical":
+                untried = [c for c in spec.get("choices", []) if c not in tried_approaches]
+                if untried:
+                    insights.setdefault("untried_approaches", []).extend(untried)
+
     return {
         "project": project,
         "metric_name": metric_name,
@@ -215,6 +295,7 @@ def build_board_data(project_dir: Path) -> dict[str, Any] | None:
         "counts": counts,
         "queue_counts": queue_counts,
         "approach_summary": approach_summary,
+        "insights": insights,
         "gen_history": load_generate_history(project_dir),
         "recent_events": load_events(project_dir, last_n=10),
     }

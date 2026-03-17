@@ -65,6 +65,8 @@ _HTML_TEMPLATE = """\
   </div>
 </div>
 
+<div class="grid" id="insightsGrid" style="margin-bottom:1.5rem;"></div>
+
 <div class="card">
   <h2>Experiment Log</h2>
   <table>
@@ -175,7 +177,26 @@ new Chart(document.getElementById('approachChart'), {{
   }}
 }});
 
-// Populate log table with diff + best_params
+// Insights cards
+const ins = DATA.insights || {{}};
+const ig = document.getElementById('insightsGrid');
+if (ig) {{
+  const cards = [];
+  if (ins.experiments_per_hour) cards.push({{label:'Speed', value:ins.experiments_per_hour+' exp/hr', detail:ins.total_elapsed_minutes+'min elapsed'}});
+  if (ins.total_optimizer_trials) cards.push({{label:'Optimizer', value:ins.total_optimizer_trials+' trials', detail:ins.total_optimizer_seconds+'s total'}});
+  if (ins.experiments_since_best !== undefined) {{
+    const trend = ins.recent_trend || '';
+    cards.push({{label:'Convergence', value: ins.experiments_since_best === 0 ? 'Latest is best' : ins.experiments_since_best+' since best', detail: trend ? 'Trend: '+trend : ''}});
+  }}
+  if (ins.pending_count > 0) cards.push({{label:'Queue', value:ins.pending_count+' pending', detail: ins.eta_minutes ? '~'+ins.eta_minutes+'min ETA' : ''}});
+  if (ins.next_hypothesis) cards.push({{label:'Next', value:ins.next_hypothesis.approach || ins.next_hypothesis.id, detail:ins.next_hypothesis.description}});
+  if (ins.untried_approaches && ins.untried_approaches.length) cards.push({{label:'Untried', value:ins.untried_approaches.length+' approaches', detail:ins.untried_approaches.join(', ')}});
+  cards.forEach(c => {{
+    ig.innerHTML += `<div class="card"><h2>${{c.label}}</h2><div class="stat" style="font-size:1.4rem">${{c.value}}</div><div class="stat-label">${{c.detail}}</div></div>`;
+  }});
+}}
+
+// Populate log table
 const tbody = document.getElementById('logBody');
 DATA.ledger.slice().reverse().forEach(r => {{
   const pm = r.primary_metric || {{}};
@@ -288,6 +309,7 @@ def generate_html_report(data: dict[str, Any], output_path: Path) -> None:
         "ledger": data["ledger"],
         "approach_summary": data.get("approach_summary", {}),
         "lever_baselines": lever_baselines,
+        "insights": data.get("insights", {}),
         "gen_history": data.get("gen_history", []),
     }, ensure_ascii=False)
 

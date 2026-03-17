@@ -431,6 +431,39 @@ def _format_board(data: dict[str, Any]) -> None:
 
     print("Results: " + ", ".join(f"{k}: {v}" for k, v in sorted(counts.items())))
     print("Queue: " + ", ".join(f"{k}: {v}" for k, v in sorted(queue_counts.items())))
+
+    # Insights
+    insights = data.get("insights", {})
+    insight_parts = []
+    if insights.get("experiments_per_hour"):
+        insight_parts.append(f"{insights['experiments_per_hour']} exp/hr")
+    if insights.get("total_elapsed_minutes"):
+        insight_parts.append(f"{insights['total_elapsed_minutes']}min elapsed")
+    if insights.get("total_optimizer_trials"):
+        insight_parts.append(f"{insights['total_optimizer_trials']} optimizer trials")
+    if insight_parts:
+        print("Speed: " + " | ".join(insight_parts))
+
+    if insights.get("experiments_since_best") is not None:
+        n = insights["experiments_since_best"]
+        trend = insights.get("recent_trend", "")
+        trend_str = f" (trend: {trend})" if trend else ""
+        if n == 0:
+            print(f"Convergence: best was the latest experiment{trend_str}")
+        else:
+            print(f"Convergence: {n} experiments since last best{trend_str}")
+
+    if insights.get("eta_minutes"):
+        print(f"ETA: ~{insights['eta_minutes']}min for {insights['pending_count']} pending")
+
+    nxt = insights.get("next_hypothesis")
+    if nxt:
+        print(f"Next: {nxt['id']} — {nxt['approach']} — {nxt['description']}")
+
+    untried = insights.get("untried_approaches")
+    if untried:
+        print(f"Untried: {', '.join(untried)}")
+
     print()
 
     recent = ledger[-10:]
