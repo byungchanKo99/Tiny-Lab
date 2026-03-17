@@ -68,7 +68,7 @@ _HTML_TEMPLATE = """\
 <div class="card">
   <h2>Experiment Log</h2>
   <table>
-    <thead><tr><th>ID</th><th>Verdict</th><th>{metric_name}</th><th>Delta%</th><th>Approach/Config</th><th>Best Params</th><th>Reasoning</th></tr></thead>
+    <thead><tr><th>ID</th><th>Verdict</th><th>{metric_name}</th><th>Delta%</th><th>Changes (diff)</th><th>Best Params</th></tr></thead>
     <tbody id="logBody"></tbody>
   </table>
 </div>
@@ -175,22 +175,17 @@ new Chart(document.getElementById('approachChart'), {{
   }}
 }});
 
-// Populate log table with approach + best_params columns
+// Populate log table with diff + best_params
 const tbody = document.getElementById('logBody');
 DATA.ledger.slice().reverse().forEach(r => {{
   const pm = r.primary_metric || {{}};
   const cls = (r.class || '').toLowerCase();
-  const approach = r.approach || r.changed_variable || '';
-  const opt = r.optimize_result || {{}};
-  const params = opt.best_params
-    ? Object.entries(opt.best_params).map(([k,v]) => k+'='+v).join(', ')
-    : (r.config && !r.config.baseline_command ? Object.entries(r.config).map(([k,v]) => k+'='+v).join(', ') : '');
-  const reasoning = (r.reasoning || r.question || '').slice(0, 60);
+  const diff = r._diff || '';
+  const bestParams = r._best_params_str || '';
   tbody.innerHTML += `<tr>
     <td>${{r.id}}</td><td class="${{cls}}">${{r.class}}</td>
     <td>${{pm[DATA.metric_name] ?? 'N/A'}}</td><td>${{pm.delta_pct ?? 'N/A'}}</td>
-    <td>${{approach}}</td><td>${{params}}</td>
-    <td>${{reasoning}}</td></tr>`;
+    <td>${{diff}}</td><td>${{bestParams}}</td></tr>`;
 }});
 
 // Optimization Summary
@@ -238,17 +233,18 @@ def generate_html_report(data: dict[str, Any], output_path: Path) -> None:
     if best_row:
         bpm = best_row.get("primary_metric", {})
         best_metric = f"{bpm.get(metric_name, 'N/A')}"
-        # v2: show approach + best_params
-        if best_row.get("approach"):
-            best_desc = f"{best_row['id']} — {best_row['approach']} (delta={bpm.get('delta_pct')}%)"
-            opt = best_row.get("optimize_result", {})
-            bp = opt.get("best_params", {})
-            best_detail = ", ".join(f"{k}={v}" for k, v in bp.items()) if bp else ""
-            if opt.get("n_trials"):
-                best_detail += f" ({opt['n_trials']} trials, {opt.get('total_seconds', '?')}s)"
-        else:
-            best_desc = f"{best_row['id']} — {best_row.get('changed_variable')}={best_row.get('value')} (delta={bpm.get('delta_pct')}%)"
-            best_detail = ""
+        best_desc = f"{best_row['id']} (delta={bpm.get('delta_pct')}%)"
+        diff = best_row.get("_diff", "")
+        best_params = best_row.get("_best_params_str", "")
+        detail_parts = []
+        if diff:
+            detail_parts.append(f"Changes: {diff}")
+        if best_params:
+            detail_parts.append(f"Best params: {best_params}")
+        opt = best_row.get("optimize_result", {})
+        if opt.get("n_trials"):
+            detail_parts.append(f"{opt['n_trials']} trials in {opt.get('total_seconds', '?')}s")
+        best_detail = " | ".join(detail_parts)
     else:
         best_metric = "N/A"
         best_desc = "No experiments yet"

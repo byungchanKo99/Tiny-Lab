@@ -12,8 +12,67 @@ from .events import load_events
 from .generate import load_generate_history
 from .ledger import load_ledger, get_baseline_metric, find_best_result
 from .paths import state_path, lock_path, queue_path
-from .project import load_project
+from .project import load_project, levers as get_levers, baseline_command as get_baseline_cmd
 from .queue import load_queue
+
+
+def _build_experiment_diff(row: dict[str, Any], lever_baselines: dict[str, Any]) -> str:
+    """Build a human-readable diff string showing what changed from baseline.
+
+    Examples:
+      "model: lgbm → xgboost"
+      "lr: 0.01 → 0.05, depth: 6 → 4"
+      "approach: stacking_ensemble (new)"
+    """
+    if row.get("class") == "BASELINE":
+        return "(baseline)"
+
+    parts = []
+
+    # v2 approach-based
+    if row.get("approach"):
+        parts.append(f"approach: {row['approach']}")
+        opt = row.get("optimize_result", {})
+        bp = opt.get("best_params", {})
+        if bp:
+            for k, v in bp.items():
+                bl = lever_baselines.get(k, {}).get("baseline")
+                if bl is not None:
+                    parts.append(f"{k}: {bl} → {v}")
+                else:
+                    parts.append(f"{k}: {v}")
+        return ", ".join(parts)
+
+    # v1 lever-based
+    changed = row.get("changed_variable", "")
+    value = row.get("value")
+    config = row.get("config", {})
+
+    if isinstance(value, dict):
+        # multi-lever
+        for k, v in value.items():
+            bl = lever_baselines.get(k, {}).get("baseline")
+            if bl is not None:
+                parts.append(f"{k}: {bl} → {v}")
+            else:
+                parts.append(f"{k}: {v}")
+    elif changed and value is not None:
+        bl = lever_baselines.get(changed, {}).get("baseline")
+        if bl is not None:
+            parts.append(f"{changed}: {bl} → {value}")
+        else:
+            parts.append(f"{changed}: {value}")
+    elif config:
+        for k, v in config.items():
+            if k == "baseline_command":
+                continue
+            bl = lever_baselines.get(k, {}).get("baseline")
+            if bl is not None:
+                parts.append(f"{k}: {bl} → {v}")
+            else:
+                parts.append(f"{k}: {v}")
+
+    return ", ".join(parts) if parts else ""
 
 
 def build_status_data(project_dir: Path) -> dict[str, Any]:
@@ -133,6 +192,17 @@ def build_board_data(project_dir: Path) -> dict[str, Any] | None:
                 approach_summary[key]["best_value"] = val
                 opt = row.get("optimize_result", {})
                 approach_summary[key]["best_params"] = opt.get("best_params", {})
+
+    # Build diff for each experiment
+    lever_baselines = get_levers(project)
+    for row in ledger:
+        row["_diff"] = _build_experiment_diff(row, lever_baselines)
+        # Flatten optimizer best_params for easy display
+        opt = row.get("optimize_result", {})
+        if opt.get("best_params"):
+            row["_best_params_str"] = ", ".join(f"{k}={v}" for k, v in opt["best_params"].items())
+        else:
+            row["_best_params_str"] = ""
 
     return {
         "project": project,

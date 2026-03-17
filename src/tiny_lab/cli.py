@@ -415,19 +415,18 @@ def _format_board(data: dict[str, Any]) -> None:
 
     if best_row:
         bpm = best_row.get("primary_metric", {})
-        best_line = f"Best: {best_row['id']} — {metric_name}={bpm.get(metric_name)} (delta={bpm.get('delta_pct')}%)"
-        if best_row.get("approach"):
-            best_line += f" [{best_row['approach']}]"
-        else:
-            best_line += f" [{best_row.get('changed_variable')}={_format_value(best_row.get('value'))}]"
+        diff = best_row.get("_diff", "")
+        print(f"Best: {best_row['id']} — {metric_name}={bpm.get(metric_name)} (delta={bpm.get('delta_pct')}%)")
+        if diff:
+            print(f"  Changes: {diff}")
         opt = best_row.get("optimize_result")
         if opt:
             bp = opt.get("best_params", {})
-            params_str = ", ".join(f"{k}={v}" for k, v in bp.items()) if bp else ""
-            best_line += f" ({opt.get('n_trials', '?')} trials, {opt.get('total_seconds', '?')}s)"
-            if params_str:
-                best_line += f"\n       best_params: {{{params_str}}}"
-        print(best_line)
+            print(f"  Optimizer: {opt.get('n_trials', '?')} trials in {opt.get('total_seconds', '?')}s")
+            if bp:
+                print(f"  Best hyperparameters:")
+                for k, v in bp.items():
+                    print(f"    {k}: {v}")
     print()
 
     print("Results: " + ", ".join(f"{k}: {v}" for k, v in sorted(counts.items())))
@@ -436,35 +435,17 @@ def _format_board(data: dict[str, Any]) -> None:
 
     recent = ledger[-10:]
     if recent:
-        print(f"{'ID':<10} {'Verdict':<12} {metric_name:<15} {'Delta%':<10} {'Config':<30} {'Reasoning'}")
+        print(f"{'ID':<10} {'Verdict':<10} {metric_name:<12} {'Delta%':<10} {'Changes (diff from baseline)'}")
         print("-" * 120)
         for row in recent:
             pm = row.get("primary_metric", {})
             val = pm.get(metric_name, "N/A")
             delta = pm.get("delta_pct", "N/A")
-            # Config: approach + best_params for v2, else changed_variable=value
-            if row.get("approach"):
-                config_str = row["approach"]
-                opt = row.get("optimize_result")
-                if opt:
-                    bp = opt.get("best_params", {})
-                    if bp:
-                        params_short = ", ".join(f"{k}={v}" for k, v in list(bp.items())[:3])
-                        config_str += f" ({params_short})"
-                    else:
-                        config_str += f" ({opt.get('n_trials', '?')}T)"
-            else:
-                config = row.get("config", {})
-                if config and "baseline_command" not in config:
-                    config_str = ", ".join(f"{k}={_format_value(v)}" for k, v in config.items())
-                elif row.get("changed_variable") and row.get("value"):
-                    config_str = f"{row['changed_variable']}={_format_value(row['value'])}"
-                else:
-                    config_str = ""
-            # Reasoning: use reasoning field, fallback to question
-            reasoning = row.get("reasoning", "") or row.get("question", "")
-            reasoning = reasoning[:60]
-            print(f"{row.get('id', '?'):<10} {row.get('class', '?'):<12} {str(val):<15} {str(delta):<10} {config_str:<30} {reasoning}")
+            diff = row.get("_diff", "")
+            best_params = row.get("_best_params_str", "")
+            print(f"{row.get('id', '?'):<10} {row.get('class', '?'):<10} {str(val):<12} {str(delta):<10} {diff}")
+            if best_params:
+                print(f"{'':>10} {'':>10} {'':>12} {'':>10} best_params: {best_params}")
     else:
         print("No experiments yet.")
 
