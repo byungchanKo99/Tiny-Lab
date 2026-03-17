@@ -415,15 +415,18 @@ def _format_board(data: dict[str, Any]) -> None:
 
     if best_row:
         bpm = best_row.get("primary_metric", {})
-        value_display = _format_value(best_row.get("value"))
         best_line = f"Best: {best_row['id']} — {metric_name}={bpm.get(metric_name)} (delta={bpm.get('delta_pct')}%)"
         if best_row.get("approach"):
             best_line += f" [{best_row['approach']}]"
         else:
-            best_line += f" [{best_row.get('changed_variable')}={value_display}]"
+            best_line += f" [{best_row.get('changed_variable')}={_format_value(best_row.get('value'))}]"
         opt = best_row.get("optimize_result")
         if opt:
+            bp = opt.get("best_params", {})
+            params_str = ", ".join(f"{k}={v}" for k, v in bp.items()) if bp else ""
             best_line += f" ({opt.get('n_trials', '?')} trials, {opt.get('total_seconds', '?')}s)"
+            if params_str:
+                best_line += f"\n       best_params: {{{params_str}}}"
         print(best_line)
     print()
 
@@ -439,16 +442,21 @@ def _format_board(data: dict[str, Any]) -> None:
             pm = row.get("primary_metric", {})
             val = pm.get(metric_name, "N/A")
             delta = pm.get("delta_pct", "N/A")
-            # Config: use approach for v2, else ledger config dict, else changed_variable=value
+            # Config: approach + best_params for v2, else changed_variable=value
             if row.get("approach"):
                 config_str = row["approach"]
                 opt = row.get("optimize_result")
                 if opt:
-                    config_str += f" ({opt.get('n_trials', '?')}T, {opt.get('total_seconds', '?')}s)"
+                    bp = opt.get("best_params", {})
+                    if bp:
+                        params_short = ", ".join(f"{k}={v}" for k, v in list(bp.items())[:3])
+                        config_str += f" ({params_short})"
+                    else:
+                        config_str += f" ({opt.get('n_trials', '?')}T)"
             else:
                 config = row.get("config", {})
                 if config and "baseline_command" not in config:
-                    config_str = ", ".join(f"{k}={v}" for k, v in config.items())
+                    config_str = ", ".join(f"{k}={_format_value(v)}" for k, v in config.items())
                 elif row.get("changed_variable") and row.get("value"):
                     config_str = f"{row['changed_variable']}={_format_value(row['value'])}"
                 else:
@@ -511,32 +519,44 @@ def _export_board(data: dict[str, Any], fmt: str, output_path: str | None) -> No
         rows = []
         for row in ledger:
             pm = row.get("primary_metric", {})
-            rows.append({
+            entry: dict[str, Any] = {
                 "id": row.get("id"),
                 "class": row.get("class"),
                 "changed_variable": row.get("changed_variable"),
-                "value": row.get("value"),
+                "value": _format_value(row.get("value")),
                 metric_name: pm.get(metric_name),
                 "baseline": pm.get("baseline"),
                 "delta_pct": pm.get("delta_pct"),
                 "question": row.get("question"),
-            })
+            }
+            if row.get("approach"):
+                entry["approach"] = row["approach"]
+            opt = row.get("optimize_result")
+            if opt:
+                entry["optimize_result"] = opt
+            rows.append(entry)
         text = json.dumps(rows, indent=2, ensure_ascii=False)
     else:
         buf = io.StringIO()
-        fields = ["id", "class", "changed_variable", "value", metric_name, "baseline", "delta_pct", "question"]
+        fields = ["id", "class", "approach", "changed_variable", "value", metric_name,
+                   "baseline", "delta_pct", "n_trials", "best_params", "question"]
         writer = csv.DictWriter(buf, fieldnames=fields)
         writer.writeheader()
         for row in ledger:
             pm = row.get("primary_metric", {})
+            opt = row.get("optimize_result", {})
+            bp = opt.get("best_params", {})
             writer.writerow({
                 "id": row.get("id"),
                 "class": row.get("class"),
+                "approach": row.get("approach", ""),
                 "changed_variable": row.get("changed_variable"),
-                "value": row.get("value"),
+                "value": _format_value(row.get("value")),
                 metric_name: pm.get(metric_name),
                 "baseline": pm.get("baseline"),
                 "delta_pct": pm.get("delta_pct"),
+                "n_trials": opt.get("n_trials", ""),
+                "best_params": ", ".join(f"{k}={v}" for k, v in bp.items()) if bp else "",
                 "question": row.get("question"),
             })
         text = buf.getvalue()
@@ -571,22 +591,22 @@ def _format_sparklines(data: dict[str, Any]) -> None:
     else:
         print(f"Metric trend ({metric_name}): (no data)")
 
-    # Per-lever win/loss ratio
-    lever_stats: dict[str, dict[str, int]] = {}
+    # Per-approach win/loss ratio
+    approach_stats: dict[str, dict[str, int]] = {}
     for row in ledger:
         if row.get("class") in ("BASELINE", None):
             continue
-        lever = row.get("changed_variable", "?")
-        if lever not in lever_stats:
-            lever_stats[lever] = {"WIN": 0, "LOSS": 0, "INVALID": 0, "INCONCLUSIVE": 0}
+        key = row.get("approach") or row.get("changed_variable", "?")
+        if key not in approach_stats:
+            approach_stats[key] = {"WIN": 0, "LOSS": 0, "INVALID": 0, "INCONCLUSIVE": 0}
         cls = row.get("class", "INVALID")
-        if cls in lever_stats[lever]:
-            lever_stats[lever][cls] += 1
+        if cls in approach_stats[key]:
+            approach_stats[key][cls] += 1
 
-    if lever_stats:
+    if approach_stats:
         print()
-        print("Lever stats:")
-        for lever, stats in sorted(lever_stats.items()):
+        print("Approach stats:")
+        for lever, stats in sorted(approach_stats.items()):
             total = stats["WIN"] + stats["LOSS"]
             ratio = f"{stats['WIN']}/{total}" if total else "0/0"
             bar_len = min(stats["WIN"], 20)

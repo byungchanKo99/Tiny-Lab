@@ -276,7 +276,7 @@ class TestSparklines:
         _format_sparklines(data)
         output = capsys.readouterr().out
         assert "Metric trend" in output
-        assert "Lever stats" in output
+        assert "Approach stats" in output
 
     def test_sparkline_no_data(self, project_dir: Path, capsys):
         data = _build_board_data(project_dir)

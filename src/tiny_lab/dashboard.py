@@ -113,6 +113,27 @@ def build_board_data(project_dir: Path) -> dict[str, Any] | None:
     if baseline_entry and baseline_entry.get("config", {}).get("baseline_command"):
         baseline_command = baseline_entry["config"]["baseline_command"]
 
+    # Approach-level aggregation for charts
+    approach_summary: dict[str, dict[str, Any]] = {}
+    for row in ledger:
+        if row.get("class") == "BASELINE":
+            continue
+        key = row.get("approach") or row.get("changed_variable", "unknown")
+        if key not in approach_summary:
+            approach_summary[key] = {"wins": 0, "losses": 0, "best_value": None, "best_params": {}}
+        cls = row.get("class", "")
+        if cls == "WIN":
+            approach_summary[key]["wins"] += 1
+        elif cls == "LOSS":
+            approach_summary[key]["losses"] += 1
+        val = row.get("primary_metric", {}).get(metric_name)
+        if val is not None:
+            cur_best = approach_summary[key]["best_value"]
+            if cur_best is None or (direction == "maximize" and val > cur_best) or (direction == "minimize" and val < cur_best):
+                approach_summary[key]["best_value"] = val
+                opt = row.get("optimize_result", {})
+                approach_summary[key]["best_params"] = opt.get("best_params", {})
+
     return {
         "project": project,
         "metric_name": metric_name,
@@ -123,6 +144,7 @@ def build_board_data(project_dir: Path) -> dict[str, Any] | None:
         "best_row": best_row,
         "counts": counts,
         "queue_counts": queue_counts,
+        "approach_summary": approach_summary,
         "gen_history": load_generate_history(project_dir),
         "recent_events": load_events(project_dir, last_n=10),
     }

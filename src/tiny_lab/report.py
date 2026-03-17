@@ -25,6 +25,7 @@ _HTML_TEMPLATE = """\
   .card h2 {{ color: #58a6ff; font-size: 1rem; margin-bottom: 1rem; }}
   .stat {{ font-size: 2rem; font-weight: bold; color: #f0f6fc; }}
   .stat-label {{ color: #8b949e; font-size: 0.85rem; }}
+  .stat-detail {{ color: #8b949e; font-size: 0.75rem; margin-top: 0.25rem; }}
   canvas {{ max-height: 300px; }}
   table {{ width: 100%; border-collapse: collapse; margin-top: 1rem; }}
   th, td {{ padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid #21262d; font-size: 0.85rem; }}
@@ -48,13 +49,14 @@ _HTML_TEMPLATE = """\
     <canvas id="trendChart"></canvas>
   </div>
   <div class="card">
-    <h2>Lever Comparison</h2>
-    <canvas id="leverChart"></canvas>
+    <h2>Approach Comparison</h2>
+    <canvas id="approachChart"></canvas>
   </div>
   <div class="card">
     <h2>Best Result</h2>
     <div class="stat">{best_metric}</div>
     <div class="stat-label">{best_desc}</div>
+    <div class="stat-detail">{best_detail}</div>
   </div>
   <div class="card">
     <h2>Baseline</h2>
@@ -66,7 +68,7 @@ _HTML_TEMPLATE = """\
 <div class="card">
   <h2>Experiment Log</h2>
   <table>
-    <thead><tr><th>ID</th><th>Verdict</th><th>{metric_name}</th><th>Delta%</th><th>Config</th><th>Reasoning</th></tr></thead>
+    <thead><tr><th>ID</th><th>Verdict</th><th>{metric_name}</th><th>Delta%</th><th>Approach/Config</th><th>Best Params</th><th>Reasoning</th></tr></thead>
     <tbody id="logBody"></tbody>
   </table>
 </div>
@@ -86,9 +88,16 @@ new Chart(document.getElementById('classChart'), {{
   options: {{ plugins: {{ legend: {{ labels: {{ color: '#c9d1d9' }} }} }} }}
 }});
 
-// Metric trend line
+// Metric trend line — color by approach
 const experiments = DATA.ledger.filter(r => r.class !== 'BASELINE');
+const approaches = [...new Set(experiments.map(r => r.approach || r.changed_variable || '?'))];
+const colors = ['#58a6ff', '#3fb950', '#f0883e', '#bc8cff', '#f85149', '#39d353', '#db61a2', '#79c0ff'];
 const metricVals = experiments.map(r => (r.primary_metric || {{}})[DATA.metric_name]);
+const bgColors = experiments.map(r => {{
+  const a = r.approach || r.changed_variable || '?';
+  return colors[approaches.indexOf(a) % colors.length];
+}});
+
 new Chart(document.getElementById('trendChart'), {{
   type: 'line',
   data: {{
@@ -97,67 +106,107 @@ new Chart(document.getElementById('trendChart'), {{
       label: DATA.metric_name,
       data: metricVals,
       borderColor: '#58a6ff', backgroundColor: 'rgba(88,166,255,0.1)', fill: true, tension: 0.3,
+      pointBackgroundColor: bgColors, pointRadius: 4,
     }}, {{
       label: 'Baseline',
       data: experiments.map(() => DATA.baseline),
       borderColor: '#f85149', borderDash: [5,5], pointRadius: 0,
     }}]
   }},
-  options: {{ scales: {{ x: {{ ticks: {{ color: '#8b949e' }} }}, y: {{ ticks: {{ color: '#8b949e' }} }} }},
-             plugins: {{ legend: {{ labels: {{ color: '#c9d1d9' }} }} }} }}
+  options: {{
+    scales: {{ x: {{ ticks: {{ color: '#8b949e' }} }}, y: {{ ticks: {{ color: '#8b949e' }} }} }},
+    plugins: {{
+      legend: {{ labels: {{ color: '#c9d1d9' }} }},
+      tooltip: {{
+        callbacks: {{
+          afterLabel: function(ctx) {{
+            const r = experiments[ctx.dataIndex];
+            if (!r) return '';
+            const lines = [];
+            if (r.approach) lines.push('Approach: ' + r.approach);
+            const opt = r.optimize_result;
+            if (opt && opt.best_params) {{
+              lines.push('Params: ' + Object.entries(opt.best_params).map(([k,v]) => k+'='+v).join(', '));
+              lines.push('Trials: ' + opt.n_trials + ' (' + opt.total_seconds + 's)');
+            }}
+            return lines.join('\\n');
+          }}
+        }}
+      }}
+    }}
+  }}
 }});
 
-// Lever win/loss bar chart
-const levers = {{}};
-experiments.forEach(r => {{
-  const lv = r.changed_variable || '?';
-  if (!levers[lv]) levers[lv] = {{ WIN: 0, LOSS: 0, INVALID: 0 }};
-  if (levers[lv][r.class] !== undefined) levers[lv][r.class]++;
-}});
-const leverNames = Object.keys(levers);
-new Chart(document.getElementById('leverChart'), {{
+// Approach comparison bar chart (best value per approach)
+const approachData = DATA.approach_summary || {{}};
+const approachNames = Object.keys(approachData);
+new Chart(document.getElementById('approachChart'), {{
   type: 'bar',
   data: {{
-    labels: leverNames,
-    datasets: [
-      {{ label: 'WIN', data: leverNames.map(l => levers[l].WIN), backgroundColor: '#3fb950' }},
-      {{ label: 'LOSS', data: leverNames.map(l => levers[l].LOSS), backgroundColor: '#f85149' }},
-      {{ label: 'INVALID', data: leverNames.map(l => levers[l].INVALID), backgroundColor: '#d29922' }},
-    ]
+    labels: approachNames,
+    datasets: [{{
+      label: 'Best ' + DATA.metric_name,
+      data: approachNames.map(a => approachData[a].best_value),
+      backgroundColor: approachNames.map((a, i) => colors[i % colors.length]),
+    }}]
   }},
-  options: {{ scales: {{ x: {{ stacked: true, ticks: {{ color: '#8b949e' }} }}, y: {{ stacked: true, ticks: {{ color: '#8b949e' }} }} }},
-             plugins: {{ legend: {{ labels: {{ color: '#c9d1d9' }} }} }} }}
+  options: {{
+    indexAxis: approachNames.length > 6 ? 'y' : 'x',
+    scales: {{
+      x: {{ ticks: {{ color: '#8b949e' }} }},
+      y: {{ ticks: {{ color: '#8b949e' }} }}
+    }},
+    plugins: {{
+      legend: {{ display: false }},
+      tooltip: {{
+        callbacks: {{
+          afterLabel: function(ctx) {{
+            const a = approachNames[ctx.dataIndex];
+            const info = approachData[a];
+            const lines = ['W:' + info.wins + ' L:' + info.losses];
+            if (info.best_params && Object.keys(info.best_params).length) {{
+              lines.push(Object.entries(info.best_params).map(([k,v]) => k+'='+v).join(', '));
+            }}
+            return lines.join('\\n');
+          }}
+        }}
+      }}
+    }}
+  }}
 }});
 
-// Populate log table
+// Populate log table with approach + best_params columns
 const tbody = document.getElementById('logBody');
 DATA.ledger.slice().reverse().forEach(r => {{
   const pm = r.primary_metric || {{}};
   const cls = (r.class || '').toLowerCase();
-  const cfg = r.config && !r.config.baseline_command
-    ? Object.entries(r.config).map(([k,v]) => k+'='+v).join(', ')
-    : (r.changed_variable ? r.changed_variable + '=' + (typeof r.value === 'object' ? Object.entries(r.value).map(([k,v]) => k+'='+v).join(', ') : (r.value || '')) : '');
-  const reasoning = (r.reasoning || r.question || '').slice(0, 80);
+  const approach = r.approach || r.changed_variable || '';
+  const opt = r.optimize_result || {{}};
+  const params = opt.best_params
+    ? Object.entries(opt.best_params).map(([k,v]) => k+'='+v).join(', ')
+    : (r.config && !r.config.baseline_command ? Object.entries(r.config).map(([k,v]) => k+'='+v).join(', ') : '');
+  const reasoning = (r.reasoning || r.question || '').slice(0, 60);
   tbody.innerHTML += `<tr>
     <td>${{r.id}}</td><td class="${{cls}}">${{r.class}}</td>
     <td>${{pm[DATA.metric_name] ?? 'N/A'}}</td><td>${{pm.delta_pct ?? 'N/A'}}</td>
-    <td>${{cfg}}</td>
+    <td>${{approach}}</td><td>${{params}}</td>
     <td>${{reasoning}}</td></tr>`;
 }});
 
-// Optimization Trials convergence (for experiments with optimize_result)
+// Optimization Summary
 const optExps = DATA.ledger.filter(r => r.optimize_result && r.optimize_result.n_trials > 1);
 if (optExps.length > 0) {{
   const optDiv = document.createElement('div');
   optDiv.className = 'card';
   optDiv.style.marginTop = '1.5rem';
-  optDiv.innerHTML = '<h2>Optimization Summary</h2><table><thead><tr><th>Experiment</th><th>Approach</th><th>Trials</th><th>Time (s)</th><th>Best Value</th><th>Best Params</th></tr></thead><tbody id="optBody"></tbody></table>';
+  optDiv.innerHTML = '<h2>Optimization Summary</h2><table><thead><tr><th>Experiment</th><th>Approach</th><th>Trials</th><th>Time (s)</th><th>Best Value</th><th>Delta%</th><th>Best Params</th></tr></thead><tbody id="optBody"></tbody></table>';
   document.body.appendChild(optDiv);
   const optBody = document.getElementById('optBody');
   optExps.forEach(r => {{
     const opt = r.optimize_result;
+    const pm = r.primary_metric || {{}};
     const params = opt.best_params ? Object.entries(opt.best_params).map(([k,v]) => k+'='+v).join(', ') : '';
-    optBody.innerHTML += `<tr><td>${{r.id}}</td><td>${{r.approach || r.changed_variable || '?'}}</td><td>${{opt.n_trials}}</td><td>${{opt.total_seconds}}</td><td>${{opt.best_value ?? 'N/A'}}</td><td>${{params}}</td></tr>`;
+    optBody.innerHTML += `<tr><td>${{r.id}}</td><td>${{r.approach || r.changed_variable || '?'}}</td><td>${{opt.n_trials}}</td><td>${{opt.total_seconds}}</td><td>${{opt.best_value ?? 'N/A'}}</td><td>${{pm.delta_pct ?? 'N/A'}}%</td><td>${{params}}</td></tr>`;
   }});
 }}
 
@@ -189,10 +238,21 @@ def generate_html_report(data: dict[str, Any], output_path: Path) -> None:
     if best_row:
         bpm = best_row.get("primary_metric", {})
         best_metric = f"{bpm.get(metric_name, 'N/A')}"
-        best_desc = f"{best_row['id']} — {best_row.get('changed_variable')}={best_row.get('value')} (delta={bpm.get('delta_pct')}%)"
+        # v2: show approach + best_params
+        if best_row.get("approach"):
+            best_desc = f"{best_row['id']} — {best_row['approach']} (delta={bpm.get('delta_pct')}%)"
+            opt = best_row.get("optimize_result", {})
+            bp = opt.get("best_params", {})
+            best_detail = ", ".join(f"{k}={v}" for k, v in bp.items()) if bp else ""
+            if opt.get("n_trials"):
+                best_detail += f" ({opt['n_trials']} trials, {opt.get('total_seconds', '?')}s)"
+        else:
+            best_desc = f"{best_row['id']} — {best_row.get('changed_variable')}={best_row.get('value')} (delta={bpm.get('delta_pct')}%)"
+            best_detail = ""
     else:
         best_metric = "N/A"
         best_desc = "No experiments yet"
+        best_detail = ""
 
     # Prepare JSON data for embedding
     data_json = json.dumps({
@@ -200,6 +260,7 @@ def generate_html_report(data: dict[str, Any], output_path: Path) -> None:
         "baseline": data["baseline"],
         "counts": data["counts"],
         "ledger": data["ledger"],
+        "approach_summary": data.get("approach_summary", {}),
         "gen_history": data.get("gen_history", []),
     }, ensure_ascii=False)
 
@@ -214,6 +275,7 @@ def generate_html_report(data: dict[str, Any], output_path: Path) -> None:
         total=len(data["ledger"]),
         best_metric=best_metric,
         best_desc=best_desc,
+        best_detail=best_detail,
         data_json=data_json,
     )
 

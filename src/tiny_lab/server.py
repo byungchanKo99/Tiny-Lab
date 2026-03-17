@@ -25,22 +25,61 @@ def _render_live_html(project_dir: Path, refresh_interval: int) -> str:
     html = tmp.read_text()
     tmp.unlink()
 
-    # Inject auto-refresh and live indicator into <head>
+    # Check loop status for live badge
+    from .dashboard import build_status_data
+    status = build_status_data(project_dir)
+    loop_running = status.get("loop") == "RUNNING"
+    badge_color = "#238636" if loop_running else "#6e7681"
+    badge_text = "RUNNING" if loop_running else "STOPPED"
+
+    # Inject auto-refresh, live badge, filtering, and auto-scroll
     refresh_meta = f'<meta http-equiv="refresh" content="{refresh_interval}">'
-    live_style = (
-        "<style>"
-        ".live-badge { position: fixed; top: 1rem; right: 1rem; "
-        "background: #238636; color: #fff; padding: 0.3rem 0.8rem; "
-        "border-radius: 12px; font-size: 0.75rem; font-weight: 600; "
-        "animation: pulse 2s infinite; z-index: 999; }"
-        "@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }"
-        "</style>"
+    live_extras = f"""<style>
+.live-badge {{ position: fixed; top: 1rem; right: 1rem;
+  background: {badge_color}; color: #fff; padding: 0.3rem 0.8rem;
+  border-radius: 12px; font-size: 0.75rem; font-weight: 600;
+  animation: pulse 2s infinite; z-index: 999; }}
+@keyframes pulse {{ 0%,100% {{ opacity: 1; }} 50% {{ opacity: 0.6; }} }}
+.filters {{ margin: 1rem 0; display: flex; gap: 0.5rem; align-items: center; }}
+.filters label {{ color: #8b949e; font-size: 0.8rem; cursor: pointer; }}
+.filters input[type=checkbox] {{ margin-right: 0.2rem; }}
+.log-scroll {{ max-height: 500px; overflow-y: auto; }}
+</style>
+<script>
+function filterTable() {{
+  const checks = document.querySelectorAll('.filter-check');
+  const active = [...checks].filter(c => c.checked).map(c => c.value);
+  document.querySelectorAll('#logBody tr').forEach(tr => {{
+    const verdict = tr.children[1]?.textContent?.trim();
+    tr.style.display = active.includes(verdict) ? '' : 'none';
+  }});
+}}
+window.addEventListener('load', () => {{
+  const logDiv = document.querySelector('.log-scroll');
+  if (logDiv) logDiv.scrollTop = logDiv.scrollHeight;
+}});
+</script>"""
+
+    live_badge = (
+        f'<div class="live-badge">{badge_text} &mdash; refreshing every {refresh_interval}s</div>'
     )
-    live_badge = f'<div class="live-badge">LIVE &mdash; refreshing every {refresh_interval}s</div>'
+
+    # Inject filter controls before the experiment log table
+    filter_html = (
+        '<div class="filters">'
+        '<label><input type="checkbox" class="filter-check" value="WIN" checked onchange="filterTable()"> WIN</label>'
+        '<label><input type="checkbox" class="filter-check" value="LOSS" checked onchange="filterTable()"> LOSS</label>'
+        '<label><input type="checkbox" class="filter-check" value="INVALID" checked onchange="filterTable()"> INVALID</label>'
+        '<label><input type="checkbox" class="filter-check" value="BASELINE" checked onchange="filterTable()"> BASELINE</label>'
+        '</div>'
+    )
 
     html = html.replace("<head>", f"<head>\n{refresh_meta}", 1)
-    html = html.replace("</head>", f"{live_style}\n</head>", 1)
+    html = html.replace("</head>", f"{live_extras}\n</head>", 1)
     html = html.replace("<body>", f"<body>\n{live_badge}", 1)
+    # Add filter controls and scrollable container to log table
+    html = html.replace('<h2>Experiment Log</h2>', f'<h2>Experiment Log</h2>\n{filter_html}\n<div class="log-scroll">')
+    html = html.replace('</tbody>\n  </table>\n</div>', '</tbody>\n  </table>\n</div>\n</div>', 1)
 
     return html
 
