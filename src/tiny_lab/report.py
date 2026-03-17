@@ -68,7 +68,7 @@ _HTML_TEMPLATE = """\
 <div class="card">
   <h2>Experiment Log</h2>
   <table>
-    <thead><tr><th>ID</th><th>Verdict</th><th>{metric_name}</th><th>Delta%</th><th>Changes (diff)</th><th>Best Params</th><th>Reasoning</th></tr></thead>
+    <thead><tr><th>ID</th><th>Verdict</th><th>{metric_name}</th><th>Delta%</th><th>Approach</th><th>Reasoning</th></tr></thead>
     <tbody id="logBody"></tbody>
   </table>
 </div>
@@ -182,11 +182,14 @@ DATA.ledger.slice().reverse().forEach(r => {{
   const cls = (r.class || '').toLowerCase();
   const diff = r._diff || '';
   const bestParams = r._best_params_str || '';
-  const reasoning = (r.reasoning || r.question || '').slice(0, 60);
+  const reasoning = (r.reasoning || r.question || '').slice(0, 80);
+  const approach = r.approach || r.changed_variable || '';
+  const opt = r.optimize_result;
+  const trialInfo = opt ? ` (${{opt.n_trials}}T, ${{opt.total_seconds}}s)` : '';
   tbody.innerHTML += `<tr>
     <td>${{r.id}}</td><td class="${{cls}}">${{r.class}}</td>
     <td>${{pm[DATA.metric_name] ?? 'N/A'}}</td><td>${{pm.delta_pct ?? 'N/A'}}</td>
-    <td>${{diff}}</td><td>${{bestParams}}</td><td>${{reasoning}}</td></tr>`;
+    <td>${{approach}}${{trialInfo}}</td><td>${{reasoning}}</td></tr>`;
 }});
 
 // Optimization Summary
@@ -195,14 +198,35 @@ if (optExps.length > 0) {{
   const optDiv = document.createElement('div');
   optDiv.className = 'card';
   optDiv.style.marginTop = '1.5rem';
-  optDiv.innerHTML = '<h2>Optimization Summary</h2><table><thead><tr><th>Experiment</th><th>Approach</th><th>Trials</th><th>Time (s)</th><th>Best Value</th><th>Delta%</th><th>Best Params</th></tr></thead><tbody id="optBody"></tbody></table>';
+  optDiv.innerHTML = '<h2>Optimization Details</h2><div id="optCards"></div>';
   document.body.appendChild(optDiv);
-  const optBody = document.getElementById('optBody');
+  const optCards = document.getElementById('optCards');
   optExps.forEach(r => {{
     const opt = r.optimize_result;
     const pm = r.primary_metric || {{}};
-    const params = opt.best_params ? Object.entries(opt.best_params).map(([k,v]) => k+'='+v).join(', ') : '';
-    optBody.innerHTML += `<tr><td>${{r.id}}</td><td>${{r.approach || r.changed_variable || '?'}}</td><td>${{opt.n_trials}}</td><td>${{opt.total_seconds}}</td><td>${{opt.best_value ?? 'N/A'}}</td><td>${{pm.delta_pct ?? 'N/A'}}%</td><td>${{params}}</td></tr>`;
+    const approach = r.approach || r.changed_variable || '?';
+    const params = opt.best_params || {{}};
+    const paramRows = Object.entries(params).map(([k, v]) => {{
+      const baseline = (DATA.lever_baselines || {{}})[k];
+      const bl = baseline ? baseline.baseline : null;
+      const arrow = bl !== null && bl !== undefined ? `${{bl}} → ${{typeof v === 'number' ? v.toFixed(4) : v}}` : `${{typeof v === 'number' ? v.toFixed(4) : v}}`;
+      return `<tr><td style="padding-left:2rem">${{k}}</td><td>${{arrow}}</td></tr>`;
+    }}).join('');
+    const efficiency = opt.n_trials > 0 ? (opt.total_seconds / opt.n_trials).toFixed(1) : '?';
+    optCards.innerHTML += `
+      <div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:1rem;margin-bottom:1rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+          <span style="color:#58a6ff;font-weight:bold;">${{r.id}} — ${{approach}}</span>
+          <span class="${{(r.class||'').toLowerCase()}}" style="font-weight:bold;">${{r.class}} (${{pm.delta_pct ?? '?'}}%)</span>
+        </div>
+        <div style="color:#8b949e;font-size:0.8rem;margin-bottom:0.5rem;">
+          ${{opt.n_trials}} trials in ${{opt.total_seconds}}s (${{efficiency}}s/trial) | best ${{DATA.metric_name}} = ${{opt.best_value ?? 'N/A'}}
+        </div>
+        <table style="width:100%">
+          <thead><tr><th style="width:40%">Parameter</th><th>Value (baseline → best)</th></tr></thead>
+          <tbody>${{paramRows}}</tbody>
+        </table>
+      </div>`;
   }});
 }}
 
@@ -252,12 +276,18 @@ def generate_html_report(data: dict[str, Any], output_path: Path) -> None:
         best_detail = ""
 
     # Prepare JSON data for embedding
+    # Extract lever baselines for optimization detail cards
+    lever_baselines = {}
+    for name, lever in data["project"].get("levers", {}).items():
+        lever_baselines[name] = {"baseline": lever.get("baseline")}
+
     data_json = json.dumps({
         "metric_name": metric_name,
         "baseline": data["baseline"],
         "counts": data["counts"],
         "ledger": data["ledger"],
         "approach_summary": data.get("approach_summary", {}),
+        "lever_baselines": lever_baselines,
         "gen_history": data.get("gen_history", []),
     }, ensure_ascii=False)
 
