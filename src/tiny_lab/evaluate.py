@@ -10,11 +10,12 @@ from .envutil import make_env
 from .errors import EvaluateError
 from .logging import log
 from .paths import eval_result_path
+from .project import metric_name, metric_direction, evaluate_type, evaluate_config, baseline_eval_command, workdir, project_name
 from .providers.base import AIProvider
 from .schemas import validate_eval_result, ValidationError
 
 
-def extract_metric_from_stdout(stdout: str, metric_name: str) -> float | None:
+def extract_metric_from_stdout(stdout: str, mname: str) -> float | None:
     """Extract metric from the last JSON object in stdout."""
     for raw in reversed(stdout.splitlines()):
         raw = raw.strip()
@@ -24,13 +25,13 @@ def extract_metric_from_stdout(stdout: str, metric_name: str) -> float | None:
             data = json.loads(raw)
         except json.JSONDecodeError:
             continue
-        if metric_name in data:
-            return data[metric_name]
-        if "metric" in data and metric_name in data["metric"]:
-            return data["metric"][metric_name]
+        if mname in data:
+            return data[mname]
+        if "metric" in data and mname in data["metric"]:
+            return data["metric"][mname]
         for val in data.values():
-            if isinstance(val, dict) and metric_name in val:
-                return val[metric_name]
+            if isinstance(val, dict) and mname in val:
+                return val[mname]
     return None
 
 
@@ -39,9 +40,9 @@ def evaluate_stdout_json(
     run_result: subprocess.CompletedProcess[str] | None,
 ) -> float | None:
     """Extract numeric metric from stdout JSON."""
-    metric_name = project["metric"]["name"]
+    mname = metric_name(project)
     if run_result and run_result.returncode == 0:
-        return extract_metric_from_stdout(run_result.stdout, metric_name)
+        return extract_metric_from_stdout(run_result.stdout, mname)
     return None
 
 
@@ -58,16 +59,16 @@ def evaluate_with_script(
     """Run a separate evaluation script that outputs JSON with the metric."""
     import time
 
-    eval_config = project.get("evaluate", {})
-    eval_command = eval_config.get("command") or project["baseline"].get("eval_command")
+    ecfg = evaluate_config(project)
+    eval_command = ecfg.get("command") or baseline_eval_command(project)
     if not eval_command:
         log("EVALUATE[script]: no eval command configured")
         return None
 
-    workdir = project.get("workdir", ".")
-    workdir_path = project_dir / workdir
+    wdir = workdir(project)
+    workdir_path = project_dir / wdir
     env = make_env(project_dir, exp_id)
-    max_retries = eval_config.get("max_retries", EVAL_MAX_RETRIES)
+    max_retries = ecfg.get("max_retries", EVAL_MAX_RETRIES)
 
     for attempt in range(max_retries + 1):
         try:
@@ -93,8 +94,8 @@ def evaluate_with_script(
             log(f"EVALUATE[script]: eval script failed (exit={result.returncode}) after all retries")
             return None
 
-        metric_name = project["metric"]["name"]
-        return extract_metric_from_stdout(result.stdout, metric_name)
+        mname = metric_name(project)
+        return extract_metric_from_stdout(result.stdout, mname)
 
     return None
 
@@ -111,20 +112,23 @@ def evaluate_with_llm(
     if provider is None:
         raise EvaluateError("evaluate.type=llm requires an AI provider")
 
-    eval_config = project.get("evaluate", {})
-    artifacts = eval_config.get("artifacts", [])
-    criteria = eval_config.get("criteria", [])
-    score_range = eval_config.get("score_range", [1, 10])
+    ecfg = evaluate_config(project)
+    artifacts = ecfg.get("artifacts", [])
+    criteria = ecfg.get("criteria", [])
+    score_range = ecfg.get("score_range", [1, 10])
 
     artifacts_desc = "\n".join(f"- {a}" for a in artifacts) if artifacts else "- (check project workdir for outputs)"
     criteria_desc = "\n".join(f"- {c}" for c in criteria) if criteria else "- General quality assessment"
 
+    mname = metric_name(project)
+    pname = project_name(project)
+
     prompt = f"""You are the evaluator for the research loop.
 
-PROJECT: {project['name']}
+PROJECT: {pname}
 EXPERIMENT: {exp_id}
 HYPOTHESIS: {hypothesis['description']}
-METRIC: {project['metric']['name']} (score range: {score_range[0]}-{score_range[1]})
+METRIC: {mname} (score range: {score_range[0]}-{score_range[1]})
 
 ARTIFACTS TO EVALUATE:
 {artifacts_desc}
@@ -195,7 +199,7 @@ def judge_verdict(project: dict[str, Any], new_metric: float | None, baseline_me
         return "INVALID"
     if baseline_metric is None:
         return "INCONCLUSIVE"
-    direction = project["metric"].get("direction", "minimize")
+    direction = metric_direction(project)
     if direction == "minimize":
         return "WIN" if new_metric < baseline_metric else "LOSS"
     else:
@@ -211,13 +215,13 @@ def dispatch_evaluate(
     provider: AIProvider | None = None,
 ) -> float | None:
     """Route to the correct EVALUATE plugin based on project.yaml evaluate.type."""
-    eval_type = project.get("evaluate", {}).get("type", "stdout_json")
+    etype = evaluate_type(project)
 
-    if eval_type == "stdout_json":
+    if etype == "stdout_json":
         return evaluate_stdout_json(project, run_result)
-    elif eval_type == "script":
+    elif etype == "script":
         return evaluate_with_script(project, run_result, exp_id, project_dir)
-    elif eval_type == "llm":
+    elif etype == "llm":
         return evaluate_with_llm(project, run_result, hypothesis, exp_id, project_dir, provider)
     else:
-        raise ValueError(f"Unknown evaluate type: {eval_type}")
+        raise ValueError(f"Unknown evaluate type: {etype}")
