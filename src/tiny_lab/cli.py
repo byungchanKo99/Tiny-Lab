@@ -66,9 +66,9 @@ Key files (in research/):
                     "it runs experiments indefinitely until stopped via 'tiny-lab stop' or circuit "
                     "breaker (5 INVALID in last 20). MUST be run in background:\n\n"
                     "  CYCLE_SLEEP=1 tiny-lab run > research/tiny_lab_run.out 2>&1 &\n\n"
-                    "The loop: picks hypothesis → builds command → runs experiment → evaluates "
-                    "result → records to ledger.jsonl → repeats. When queue empties, AI generates "
-                    "new hypotheses automatically (GENERATE phase).",
+                    "The loop: picks hypothesis → builds command → optimizes (if search_space) "
+                    "→ evaluates → records to ledger.jsonl → repeats. When queue empties, AI "
+                    "generates new hypotheses via pipeline (GENERATE phase).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     run_parser.add_argument("--until-idle", action="store_true",
@@ -101,10 +101,10 @@ Key files (in research/):
     sub.add_parser(
         "generate",
         help="Manually trigger AI hypothesis generation (normally automatic in loop)",
-        description="Calls the AI provider to analyze ledger.jsonl, diagnose research state "
-                    "(EXPLORING/REFINING/SATURATED/STUCK), and generate 3-5 new hypotheses. "
-                    "The AI may also modify project.yaml (add levers, extend search spaces, "
-                    "raise baseline). Useful for manual intervention without restarting the loop. "
+        description="Runs the generate pipeline (research → analyze → diagnose → hypotheses → summary) "
+                    "to create 3-5 new approach-based hypotheses. Diagnoses research state "
+                    "(EXPLORING/REFINING/SATURATED/STUCK) and acts accordingly. "
+                    "Useful for manual intervention without restarting the loop. "
                     "Output: number of new hypotheses added to queue.",
     )
 
@@ -117,9 +117,9 @@ Key files (in research/):
                     "This is the primary way to understand research progress at a glance.",
     )
     board_parser.add_argument("--export", choices=["csv", "json"],
-                              help="Export ledger as CSV or JSON (id, class, lever, value, metric, delta%%)")
+                              help="Export ledger as CSV or JSON (approach, metric, delta%%, best_params)")
     board_parser.add_argument("--plot", action="store_true",
-                              help="Add ASCII sparklines: metric trend over time + per-lever WIN/LOSS bars")
+                              help="Add ASCII sparklines: metric trend over time + per-approach WIN/LOSS bars")
     board_parser.add_argument("--html", metavar="FILE", nargs="?", const="research/report.html",
                               help="Generate self-contained HTML report with Chart.js visualizations")
     board_parser.add_argument("--live", action="store_true",
