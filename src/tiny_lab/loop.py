@@ -21,7 +21,10 @@ from .queue import load_queue, save_queue, pending_hypotheses
 from .ledger import load_ledger, append_ledger, get_baseline_metric, find_best_result, next_experiment_id
 from .lock import LockManager
 from .logging import configure_log, log
-from .project import load_project
+from .project import (
+    load_project, project_name, metric_name, metric_direction,
+    build_type, run_type, evaluate_type, search_space,
+)
 from .providers import get_provider
 from .events import emit_event, EventType
 from .paths import lock_path as _lock_path, state_path as _state_path
@@ -241,14 +244,14 @@ class ResearchLoop:
 
     def _handle_build_command(self, ctx: CycleContext, project: dict[str, Any]) -> State:
         assert ctx.hypothesis is not None
-        build_type = project.get("build", {}).get("type", "flag")
+        btype = build_type(project)
         ctx.exp_id = next_experiment_id(load_ledger(self.project_dir))
         try:
             ctx.command = dispatch_build(project, ctx.hypothesis, self.project_dir, self.provider)
-            log(f"BUILD[{build_type}]: {ctx.exp_id} -> {ctx.command[:120]}")
+            log(f"BUILD[{btype}]: {ctx.exp_id} -> {ctx.command[:120]}")
             return State.OPTIMIZE
         except BuildError as e:
-            log(f"BUILD[{build_type}]: {ctx.hypothesis['id']} failed -- {e}")
+            log(f"BUILD[{btype}]: {ctx.hypothesis['id']} failed -- {e}")
             self._mark_hypothesis(ctx.hypothesis, "skipped")
             ctx.reset_experiment()
             return State.CHECK_QUEUE
@@ -256,8 +259,8 @@ class ResearchLoop:
     def _handle_optimize(self, ctx: CycleContext, project: dict[str, Any]) -> State:
         """OPTIMIZE state: dispatch inner loop or fall back to single RUN."""
         assert ctx.hypothesis is not None and ctx.command is not None and ctx.exp_id is not None
-        search_space = ctx.hypothesis.get("search_space") or project.get("search_space")
-        if not search_space:
+        ss = ctx.hypothesis.get("search_space") or search_space(project)
+        if not ss:
             return self._handle_run_single(ctx, project)
 
         from .optimize import dispatch_optimize
@@ -294,34 +297,34 @@ class ResearchLoop:
     def _handle_run_single(self, ctx: CycleContext, project: dict[str, Any]) -> State:
         """Single experiment run (legacy path or no search_space)."""
         assert ctx.command is not None and ctx.exp_id is not None
-        run_type = project.get("run", {}).get("type", "command")
-        log(f"RUN[{run_type}]: launching {ctx.exp_id}")
+        rtype = run_type(project)
+        log(f"RUN[{rtype}]: launching {ctx.exp_id}")
         try:
             ctx.run_result = dispatch_run(project, ctx.command, ctx.exp_id, self.project_dir)
-            log(f"RUN[{run_type}]: {ctx.exp_id} finished (exit={ctx.run_result.returncode})")
+            log(f"RUN[{rtype}]: {ctx.exp_id} finished (exit={ctx.run_result.returncode})")
         except RunError as e:
-            log(f"RUN[{run_type}]: {ctx.exp_id} failed -- {e}")
+            log(f"RUN[{rtype}]: {ctx.exp_id} failed -- {e}")
             ctx.run_result = None
         return State.EVALUATE
 
     def _handle_evaluate(self, ctx: CycleContext, project: dict[str, Any]) -> State:
         assert ctx.hypothesis is not None and ctx.exp_id is not None
-        eval_type = project.get("evaluate", {}).get("type", "stdout_json")
-        metric_name = project["metric"]["name"]
-        baseline_metric = get_baseline_metric(self.project_dir, metric_name)
+        etype = evaluate_type(project)
+        mname = metric_name(project)
+        baseline_metric = get_baseline_metric(self.project_dir, mname)
 
         ctx.new_metric = dispatch_evaluate(
             project, ctx.run_result, ctx.hypothesis, ctx.exp_id,
             self.project_dir, self.provider,
         )
         ctx.verdict = judge_verdict(project, ctx.new_metric, baseline_metric)
-        log(f"EVALUATE[{eval_type}]: {ctx.exp_id} -> {ctx.verdict} ({metric_name}={ctx.new_metric}, baseline={baseline_metric})")
+        log(f"EVALUATE[{etype}]: {ctx.exp_id} -> {ctx.verdict} ({mname}={ctx.new_metric}, baseline={baseline_metric})")
         return State.RECORD
 
     def _handle_record(self, ctx: CycleContext, project: dict[str, Any]) -> State:
         assert ctx.hypothesis is not None and ctx.exp_id is not None
-        metric_name = project["metric"]["name"]
-        baseline_metric = get_baseline_metric(self.project_dir, metric_name)
+        mname = metric_name(project)
+        baseline_metric = get_baseline_metric(self.project_dir, mname)
 
         # v2 hypothesis (approach-based) vs v1 (lever-based)
         if "approach" in ctx.hypothesis and "lever" not in ctx.hypothesis:
@@ -338,14 +341,14 @@ class ResearchLoop:
         entry = {
             "id": ctx.exp_id,
             "question": ctx.hypothesis["description"],
-            "family": project["name"],
+            "family": project_name(project),
             "changed_variable": changed_var,
             "value": value,
             "control": "EXP-001",
             "status": "done",
             "class": ctx.verdict,
             "primary_metric": {
-                metric_name: ctx.new_metric,
+                mname: ctx.new_metric,
                 "baseline": baseline_metric,
                 "delta_pct": round((ctx.new_metric - baseline_metric) / baseline_metric * 100, 2) if ctx.new_metric and baseline_metric else None,
             },
@@ -375,9 +378,9 @@ class ResearchLoop:
 
         # Detect new best result
         if ctx.verdict == "WIN" and ctx.new_metric is not None:
-            direction = project["metric"].get("direction", "minimize")
+            direction = metric_direction(project)
             ledger = load_ledger(self.project_dir)
-            best = find_best_result(ledger, metric_name, direction)
+            best = find_best_result(ledger, mname, direction)
             if best and best.get("id") == ctx.exp_id:
                 self._emit(EventType.NEW_BEST, {
                     "exp_id": ctx.exp_id,
@@ -426,12 +429,12 @@ class ResearchLoop:
         self._recover_state()
 
         project = load_project(self.project_dir)
-        build_type = project.get("build", {}).get("type", "flag")
-        run_type = project.get("run", {}).get("type", "command")
-        eval_type = project.get("evaluate", {}).get("type", "stdout_json")
+        btype = build_type(project)
+        rtype = run_type(project)
+        etype = evaluate_type(project)
         mode = "until-idle" if self.until_idle else "infinite"
         log(f"LOOP: mode={mode}")
-        log(f"LOOP: started '{project['name']}' [build={build_type}, run={run_type}, eval={eval_type}, provider={self.provider.name}]")
+        log(f"LOOP: started '{project_name(project)}' [build={btype}, run={rtype}, eval={etype}, provider={self.provider.name}]")
 
         if not ensure_baseline(project, self.project_dir):
             log("LOOP: WARNING — no baseline metric available. First experiments will be INCONCLUSIVE.")

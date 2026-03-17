@@ -7,32 +7,34 @@ from typing import Any
 
 from .errors import BuildError
 from .logging import log
+from .project import baseline_command, build_config, build_type, immutable_files, levers, project_name, project_description
 from .providers.base import AIProvider
 
 
 def build_command_flag(project: dict[str, Any], hypothesis: dict[str, Any]) -> str:
     """Replace a lever's CLI flag in the baseline command. Deterministic, no LLM."""
-    baseline_cmd = project["baseline"]["command"].strip()
+    cmd = baseline_command(project)
     lever_name = hypothesis["lever"]
     value = hypothesis["value"]
-    lever = project["levers"][lever_name]
+    lever = levers(project)[lever_name]
     flag = lever["flag"]
     baseline_value = lever["baseline"]
 
     pattern = re.compile(re.escape(flag) + r"\s+" + re.escape(str(baseline_value)))
     replacement = f"{flag} {value}"
 
-    if pattern.search(baseline_cmd):
-        return pattern.sub(replacement, baseline_cmd)
-    return f"{baseline_cmd} {flag} {value}"
+    if pattern.search(cmd):
+        return pattern.sub(replacement, cmd)
+    return f"{cmd} {flag} {value}"
 
 
 def build_command_multi_flag(project: dict[str, Any], hypothesis: dict[str, Any]) -> str:
     """Replace multiple levers' CLI flags in the baseline command. Deterministic, no LLM."""
-    cmd = project["baseline"]["command"].strip()
+    cmd = baseline_command(project)
     values = hypothesis["value"]  # dict: {"lr": "0.05", "batch_size": "32"}
+    project_levers = levers(project)
     for lever_name, value in values.items():
-        lever = project["levers"][lever_name]
+        lever = project_levers[lever_name]
         flag = lever["flag"]
         baseline_value = lever["baseline"]
         pattern = re.compile(re.escape(flag) + r"\s+" + re.escape(str(baseline_value)))
@@ -50,7 +52,7 @@ def build_command_script(project: dict[str, Any], hypothesis: dict[str, Any]) ->
     if not script:
         lever_name = hypothesis["lever"]
         value = hypothesis["value"]
-        scripts = project.get("build", {}).get("scripts", {})
+        scripts = build_config(project).get("scripts", {})
         script = scripts.get(f"{lever_name}:{value}")
     if not script:
         raise BuildError(f"No script defined for hypothesis {hypothesis['id']}")
@@ -64,12 +66,12 @@ def build_command_code(
     provider: AIProvider,
 ) -> str:
     """AI provider modifies code based on the hypothesis. Non-deterministic."""
-    build_config = project.get("build", {})
-    target_files = build_config.get("target_files", [])
+    cfg = build_config(project)
+    target_files = cfg.get("target_files", [])
 
     target_desc = "\n".join(f"- {f}" for f in target_files) if target_files else "- (determine from project context)"
 
-    immutable = project.get("immutable_files", [])
+    immutable = immutable_files(project)
     immutable_warning = ""
     if immutable:
         immutable_warning = "\n\nDO NOT MODIFY these files under any circumstances:\n" + "\n".join(f"- {f}" for f in immutable)
@@ -79,8 +81,8 @@ def build_command_code(
 
     prompt = f"""You are the code modifier for the research loop.
 
-PROJECT: {project['name']}
-DESCRIPTION: {project['description']}
+PROJECT: {project_name(project)}
+DESCRIPTION: {project_description(project)}
 
 HYPOTHESIS: {hypothesis['description']}
 LEVER: {hypothesis['lever']} = {hypothesis['value']}
@@ -104,7 +106,7 @@ CODE_MODIFIED: {hypothesis['id']}"""
                 log(f"BUILD[code]: stderr: {line}")
         raise BuildError(f"Code modifier failed for {hypothesis['id']}")
 
-    return project["baseline"]["command"].strip()
+    return baseline_command(project)
 
 
 def dispatch_build(
@@ -114,13 +116,14 @@ def dispatch_build(
     provider: AIProvider | None = None,
 ) -> str:
     """Route to the correct BUILD plugin based on project.yaml build.type."""
-    build_type = project.get("build", {}).get("type", "flag")
+    btype = build_type(project)
+    project_levers = levers(project)
 
-    if build_type == "flag":
-        # v2 hypothesis with approach + search_space: return baseline command as-is
+    if btype == "flag":
+        # v2 hypothesis with approach: return baseline command as-is
         # (parameters will be injected by the optimizer)
         if "approach" in hypothesis and "lever" not in hypothesis:
-            return project["baseline"]["command"].strip()
+            return baseline_command(project)
 
         # Validate required fields with helpful error messages
         if "lever" not in hypothesis:
@@ -139,30 +142,29 @@ def dispatch_build(
 
         value = hypothesis["value"]
         if isinstance(value, dict):
-            # Multi-lever: validate each lever
             for lever_name, lever_value in value.items():
-                if lever_name not in project["levers"]:
+                if lever_name not in project_levers:
                     raise BuildError(f"Unknown lever '{lever_name}'")
-                lever = project["levers"][lever_name]
+                lever = project_levers[lever_name]
                 if "flag" in lever and lever_value not in lever["space"]:
                     raise BuildError(f"Value {lever_value} not in space for '{lever_name}'")
             return build_command_multi_flag(project, hypothesis)
         else:
             lever_name = hypothesis["lever"]
-            if lever_name not in project["levers"]:
+            if lever_name not in project_levers:
                 raise BuildError(f"Unknown lever '{lever_name}'")
-            lever = project["levers"][lever_name]
+            lever = project_levers[lever_name]
             if "flag" in lever and value not in lever["space"]:
                 raise BuildError(f"Value {value} not in space for '{lever_name}'")
             return build_command_flag(project, hypothesis)
 
-    elif build_type == "script":
+    elif btype == "script":
         return build_command_script(project, hypothesis)
 
-    elif build_type == "code":
+    elif btype == "code":
         if provider is None:
             raise BuildError("build.type=code requires an AI provider")
         return build_command_code(project, hypothesis, project_dir, provider)
 
     else:
-        raise BuildError(f"Unknown build type: {build_type}")
+        raise BuildError(f"Unknown build type: {btype}")

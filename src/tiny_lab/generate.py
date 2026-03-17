@@ -230,24 +230,29 @@ def _check_escalation(history: list[dict[str, Any]]) -> str | None:
 
 def generate_hypotheses(project: dict[str, Any], project_dir: Path, provider: Any) -> bool:
     """Generate new hypotheses using AI provider."""
+    from .project import (
+        project_name, project_description, metric_name, metric_direction,
+        levers, optimize_config, rules,
+    )
+
     levers_desc = []
-    for name, lever in project["levers"].items():
+    for name, lever in levers(project).items():
         if "flag" in lever:
             levers_desc.append(f"  {name}: flag={lever['flag']}, baseline={lever['baseline']}, space={lever['space']}")
         else:
             levers_desc.append(f"  {name}: type={lever.get('type', 'choice')}, space={lever['space']}")
 
-    opt_cfg = project.get("optimize", {})
+    opt_cfg = optimize_config(project)
     prompt = _GENERATE_PROMPT_TEMPLATE.format(
-        project_name=project["name"],
-        project_description=project.get("description", ""),
-        metric_name=project["metric"]["name"],
-        metric_direction=project["metric"].get("direction", "minimize"),
+        project_name=project_name(project),
+        project_description=project_description(project),
+        metric_name=metric_name(project),
+        metric_direction=metric_direction(project),
         optimize_type=opt_cfg.get("type", "random"),
         time_budget=opt_cfg.get("time_budget", "unlimited"),
         n_trials=opt_cfg.get("n_trials", "auto"),
         levers_text="\n".join(levers_desc),
-        rules_text="\n".join("- " + r for r in project.get("rules", [])),
+        rules_text="\n".join("- " + r for r in rules(project)),
     )
 
     # Inject generation history context
@@ -257,7 +262,7 @@ def generate_hypotheses(project: dict[str, Any], project_dir: Path, provider: An
         prompt = history_text + "\n\n" + prompt
 
     # Inject failure history so AI avoids repeating failed approaches
-    failure_text = _format_failure_history(project_dir, project["metric"]["name"])
+    failure_text = _format_failure_history(project_dir, metric_name(project))
     if failure_text:
         prompt = failure_text + "\n\n" + prompt
 

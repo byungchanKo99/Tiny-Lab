@@ -19,6 +19,7 @@ from typing import Any
 from .errors import OptimizeError
 from .evaluate import extract_metric_from_stdout
 from .logging import log
+from .project import metric_name as _metric_name, metric_direction as _metric_direction, levers as _levers, workdir as _workdir, search_space as _search_space, optimize_config as _optimize_config
 from .run import run_experiment_command
 
 
@@ -107,10 +108,10 @@ def build_trial_command(
     """
     import re
     cmd = base_command
-    levers = project.get("levers", {})
+    lever_defs = _levers(project)
 
     for param_name, value in params.items():
-        lever = levers.get(param_name)
+        lever = lever_defs.get(param_name)
         if lever and "flag" in lever:
             flag = lever["flag"]
             baseline_value = str(lever.get("baseline", ""))
@@ -180,8 +181,8 @@ def _run_random(
     time_budget: int | None = None,
 ) -> OptimizeResult:
     """Random sampling optimizer — no external dependencies."""
-    metric_name = project["metric"]["name"]
-    direction = project["metric"].get("direction", "minimize")
+    mname = _metric_name(project)
+    direction = _metric_direction(project)
     max_trials = n_trials or 20
 
     best_value: float | None = None
@@ -199,7 +200,7 @@ def _run_random(
         params = {name: _sample_param(spec) for name, spec in search_space.items()}
         cmd = build_trial_command(base_command, params, project)
         result = _run_single_trial(project, cmd, exp_id, i, project_dir)
-        value = _extract_trial_metric(result, metric_name)
+        value = _extract_trial_metric(result, mname)
 
         trial_record = {"params": params, "value": value, "state": "complete" if value is not None else "fail"}
         all_trials.append(trial_record)
@@ -235,8 +236,8 @@ def _run_grid(
     **_kwargs: Any,
 ) -> OptimizeResult:
     """Grid search — enumerate all combinations of categorical/discrete params."""
-    metric_name = project["metric"]["name"]
-    direction = project["metric"].get("direction", "minimize")
+    mname = _metric_name(project)
+    direction = _metric_direction(project)
 
     # Build discrete grid
     axes: dict[str, list[Any]] = {}
@@ -280,7 +281,7 @@ def _run_grid(
         params = dict(zip(param_names, combo))
         cmd = build_trial_command(base_command, params, project)
         result = _run_single_trial(project, cmd, exp_id, i, project_dir)
-        value = _extract_trial_metric(result, metric_name)
+        value = _extract_trial_metric(result, mname)
 
         trial_record = {"params": params, "value": value, "state": "complete" if value is not None else "fail"}
         all_trials.append(trial_record)
@@ -322,17 +323,17 @@ def _run_custom(
     if not script:
         raise OptimizeError("optimize_type='custom' requires 'optimize_script' in hypothesis")
 
-    metric_name = project["metric"]["name"]
-    workdir = project.get("workdir", ".")
-    workdir_path = project_dir / workdir
+    mname = _metric_name(project)
+    wdir = _workdir(project)
+    workdir_path = project_dir / wdir
 
     start = time.monotonic()
 
     env_extra = {
         "TINYLAB_BASE_COMMAND": base_command,
         "TINYLAB_SEARCH_SPACE": json.dumps(search_space),
-        "TINYLAB_METRIC_NAME": metric_name,
-        "TINYLAB_DIRECTION": project["metric"].get("direction", "minimize"),
+        "TINYLAB_METRIC_NAME": mname,
+        "TINYLAB_DIRECTION": _metric_direction(project),
         "TINYLAB_EXP_ID": exp_id,
     }
     import os
@@ -358,7 +359,7 @@ def _run_custom(
             continue
         try:
             data = json.loads(line)
-            best_value = data.get(metric_name) or data.get("best_value")
+            best_value = data.get(mname) or data.get("best_value")
             best_params = data.get("best_params", data.get("params", {}))
             break
         except json.JSONDecodeError:
@@ -414,25 +415,25 @@ def dispatch_optimize(
     Returns None if no search_space is defined.
     """
     # Hypothesis-level search_space overrides/extends project-level
-    project_space = project.get("search_space", {})
+    project_space = _search_space(project)
     hypothesis_space = hypothesis.get("search_space", {})
     search_space_raw = {**project_space, **hypothesis_space}
     if not search_space_raw:
         return None
 
     search_space = parse_search_space(search_space_raw)
-    optimize_config = project.get("optimize", {})
+    opt_cfg = _optimize_config(project)
 
     # Determine optimizer type
     opt_type = (
         hypothesis.get("optimize_type")
-        or optimize_config.get("type")
+        or opt_cfg.get("type")
         or "random"
     )
 
     # Time budget and trial count
-    time_budget = optimize_config.get("time_budget")
-    n_trials = optimize_config.get("n_trials")
+    time_budget = opt_cfg.get("time_budget")
+    n_trials = opt_cfg.get("n_trials")
 
     log(f"OPTIMIZE: dispatching {opt_type} for {hypothesis.get('id', '?')} "
         f"({len(search_space)} params, time_budget={time_budget}, n_trials={n_trials})")
