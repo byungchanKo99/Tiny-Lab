@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "required": ["hypotheses_added", "changes_made"],
+  "properties": {
+    "hypotheses_added": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "IDs of hypotheses added to queue"
+    },
+    "changes_made": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Changes to project.yaml or code"
+    }
+  }
+}

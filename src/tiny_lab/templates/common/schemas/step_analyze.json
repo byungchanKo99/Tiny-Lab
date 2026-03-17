@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "required": [
+    "total_experiments",
+    "wins",
+    "losses",
+    "invalids",
+    "best_experiment",
+    "patterns"
+  ],
+  "properties": {
+    "total_experiments": { "type": "integer" },
+    "wins": { "type": "integer" },
+    "losses": { "type": "integer" },
+    "invalids": { "type": "integer" },
+    "best_experiment": {
+      "type": "object",
+      "required": ["id", "metric_value", "approach"],
+      "properties": {
+        "id": { "type": "string" },
+        "metric_value": { "type": "number" },
+        "approach": { "type": "string" }
+      }
+    },
+    "patterns": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Observed patterns from experiment results"
+    },
+    "failure_patterns": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Common failure patterns to avoid"
+    }
+  }
+}

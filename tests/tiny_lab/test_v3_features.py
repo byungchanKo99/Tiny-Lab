@@ -498,24 +498,23 @@ class TestEvaluateRetry:
 class TestStderrLogging:
     """Provider stderr is logged on failure for diagnostics."""
 
-    def test_generate_logs_stderr_on_failure(self, project_dir: Path):
-        """GENERATE should log stderr lines when provider exits non-zero."""
+    def test_generate_logs_failure_on_provider_error(self, project_dir: Path):
+        """GENERATE pipeline should log failure when provider exits non-zero."""
         provider = MagicMock()
         provider.name = "codex"
         provider.run_structured.return_value = subprocess.CompletedProcess(
             args="", returncode=1, stdout="",
-            stderr="Error: failed to lookup address information\nstream disconnected before completion",
+            stderr="Error: failed to lookup address information",
         )
 
         project = _load_project(project_dir)
         logged = []
-        with patch("tiny_lab.generate.log", side_effect=lambda msg: logged.append(msg)):
+        with patch("tiny_lab.generate.log", side_effect=lambda msg: logged.append(msg)), \
+             patch("tiny_lab.pipeline.log", side_effect=lambda msg: logged.append(msg)):
             generate_hypotheses(project, project_dir, provider)
 
-        stderr_logs = [l for l in logged if "stderr:" in l]
-        assert len(stderr_logs) == 2
-        assert "failed to lookup address" in stderr_logs[0]
-        assert "stream disconnected" in stderr_logs[1]
+        failure_logs = [l for l in logged if "failed" in l.lower()]
+        assert len(failure_logs) >= 1
 
     def test_generate_no_stderr_log_on_success(self, project_dir: Path):
         """No stderr logging when provider succeeds."""
@@ -533,24 +532,25 @@ class TestStderrLogging:
         stderr_logs = [l for l in logged if "stderr:" in l]
         assert len(stderr_logs) == 0
 
-    def test_generate_truncates_long_stderr(self, project_dir: Path):
-        """Only last 10 lines of stderr are logged."""
+    def test_generate_pipeline_stops_on_first_failure(self, project_dir: Path):
+        """Pipeline stops at first failed step, doesn't continue."""
+        call_count = 0
+
+        def mock_run_structured(prompt, *, output_path=None, schema_path=None, tools=None, cwd=None):
+            nonlocal call_count
+            call_count += 1
+            return subprocess.CompletedProcess(args="", returncode=1, stdout="", stderr="error")
+
         provider = MagicMock()
         provider.name = "codex"
-        stderr_lines = "\n".join(f"line {i}" for i in range(20))
-        provider.run_structured.return_value = subprocess.CompletedProcess(
-            args="", returncode=1, stdout="", stderr=stderr_lines,
-        )
+        provider.run_structured = mock_run_structured
 
         project = _load_project(project_dir)
-        logged = []
-        with patch("tiny_lab.generate.log", side_effect=lambda msg: logged.append(msg)):
+        with patch("tiny_lab.pipeline.log"), patch("tiny_lab.generate.log"):
             generate_hypotheses(project, project_dir, provider)
 
-        stderr_logs = [l for l in logged if "stderr:" in l]
-        assert len(stderr_logs) == 10
-        assert "line 10" in stderr_logs[0]
-        assert "line 19" in stderr_logs[9]
+        # Pipeline has 5 steps but should stop after first failure
+        assert call_count == 1
 
     def test_build_code_logs_stderr_on_failure(self):
         """BUILD[code] should log stderr when provider fails."""

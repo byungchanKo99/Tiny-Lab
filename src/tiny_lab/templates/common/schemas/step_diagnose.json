@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "required": ["state", "reasoning", "best_so_far"],
+  "properties": {
+    "state": {
+      "type": "string",
+      "enum": ["EXPLORING", "REFINING", "SATURATED", "STUCK"]
+    },
+    "reasoning": {
+      "type": "string",
+      "description": "2-3 sentence explanation of diagnosis"
+    },
+    "best_so_far": {
+      "type": "object",
+      "required": ["experiment_id", "metric_value", "config"],
+      "properties": {
+        "experiment_id": { "type": "string" },
+        "metric_value": { "type": "number" },
+        "config": { "type": "string" }
+      }
+    }
+  }
+}

@@ -74,107 +74,46 @@ def _validate_new_entries(
     return valid_count
 
 
-_GENERATE_PROMPT_TEMPLATE = """\
-You are the autonomous research strategist for an experiment loop with a built-in optimizer.
+def _build_pipeline_context(project: dict[str, Any], project_dir: Path) -> dict[str, Any]:
+    """Build the initial context dict for the generate pipeline."""
+    from .project import (
+        project_name, project_description, metric_name, metric_direction,
+        levers, optimize_config, rules,
+    )
 
-YOU decide the STRATEGY. The optimizer decides the PARAMETERS.
-- DO: "Try ViT with augmentation" + search_space for lr, epochs, patch_size
-- DON'T: "Try lr=0.05" (this is the optimizer's job)
+    levers_desc = []
+    for name, lever in levers(project).items():
+        if "flag" in lever:
+            levers_desc.append(f"  {name}: flag={lever['flag']}, baseline={lever['baseline']}, space={lever['space']}")
+        else:
+            levers_desc.append(f"  {name}: type={lever.get('type', 'choice')}, space={lever['space']}")
 
-PROJECT: {project_name}
-DESCRIPTION: {project_description}
-METRIC: {metric_name} (direction: {metric_direction})
-OPTIMIZER: {optimize_type} (time_budget: {time_budget}s, n_trials: {n_trials})
+    opt_cfg = optimize_config(project)
+    history = load_generate_history(project_dir)
+    forced = _check_escalation(history)
+    escalation_msg = ""
+    if forced:
+        escalation_msg = (
+            f"MANDATORY ESCALATION: Last cycles were {[h.get('state') for h in history[-3:]]}.\n"
+            f"You MUST classify as {forced} and take bold action:\n"
+            f"1. Choose a fundamentally different approach\n"
+            f"2. Do NOT tweak the same levers as recent failures"
+        )
 
-CURRENT LEVERS (for parameter flag mapping):
-{levers_text}
-
-RULES:
-{rules_text}
-
-STEP 0: RESEARCH EXISTING APPROACHES
-
-Before analyzing results, search the web for relevant techniques:
-- Search for papers, blog posts, or known best practices for this type of problem
-- Look for benchmark results on similar datasets or tasks
-- Find techniques that top practitioners use
-
-Use WebSearch to find relevant information.
-Cite what you find in your hypothesis reasoning fields.
-
-STEP 1: READ AND ANALYZE (do this first, do not skip)
-
-Read these files and build a mental model of the research so far:
-- research/ledger.jsonl — all past experiments with optimize_result details
-- research/questions.yaml — research questions
-- research/hypothesis_queue.yaml — pending/done hypotheses
-- research/project.yaml — current configuration
-
-Pay special attention to optimize_result in ledger entries — these show how many trials
-the optimizer ran and what parameters it found optimal for each approach.
-
-STEP 2: DIAGNOSE THE RESEARCH STATE
-
-Same as before: EXPLORING, REFINING, SATURATED, or STUCK.
-But now focus on APPROACHES rather than individual parameter values.
-
-STEP 3: ACT BASED ON STATE
-
-**If EXPLORING:** Try fundamentally different approaches (algorithms, architectures).
-**If REFINING:** Narrow the search space or increase n_trials for the best approach.
-**If SATURATED:** Ensemble top approaches, try novel architectures, or feature engineering.
-**If STUCK:** Check if search spaces are mis-specified or if the approach itself is flawed.
-
-STEP 4: GENERATE HYPOTHESES
-
-Parameter types (search_space) are defined in project.yaml — the optimizer uses them automatically.
-You focus on WHICH APPROACH to try, not which parameters to tune.
-
-Each hypothesis MUST have:
-- id: H-{{next number}}
-- status: pending
-- approach: "{{algorithm/method name}}"
-- description: "{{what you're trying and why}}"
-- reasoning: "{{cite technique, paper, prior experiment}}"
-
-Optional:
-- search_space: {{extra params specific to this approach, not already in project.yaml}}
-- code_changes: "description of script changes needed" (triggers BUILD[code])
-- optimize_type: "grid|random|custom" (override project default)
-- references: ["papers", "URLs"]
-
-Example:
-- id: H-10
-  status: pending
-  approach: "xgboost_stacking"
-  description: "XGBoost+LightGBM stacking ensemble"
-  reasoning: "Stacking often outperforms individual models (Wolpert, 1992). Top 3 approaches were XGB, LGB, RF."
-
-CRITICAL RULES:
-- Do NOT define search_space per hypothesis unless the approach needs params NOT in project.yaml
-- Same approach + different parameter ranges = NOT a new hypothesis (optimizer handles ranges)
-- Each hypothesis = a fundamentally different strategy/algorithm
-
-ANTI-PATTERN: Multiple hypotheses for the same approach with different search_space ranges.
-GOOD PATTERN: Each hypothesis tries a fundamentally different approach.
-
-STEP 5: WRITE GENERATION SUMMARY
-
-Write to research/.generate_summary.json:
-
-```json
-{{
-  "state": "EXPLORING|REFINING|SATURATED|STUCK",
-  "reasoning": "2-3 sentence explanation",
-  "best_so_far": {{"experiment_id": "EXP-XXX", "metric_value": 123.4, "config": "brief description"}},
-  "hypotheses_added": ["H-XX", "H-YY"],
-  "changes_made": ["added approach X", "narrowed search space for Y"],
-  "references": ["technique or paper"],
-  "experiments_analyzed": 10
-}}
-```
-
-Also log what you did and why to research/loop.log (append a summary line)."""
+    return {
+        "project_name": project_name(project),
+        "project_description": project_description(project),
+        "metric_name": metric_name(project),
+        "metric_direction": metric_direction(project),
+        "optimize_type": opt_cfg.get("type", "random"),
+        "time_budget": opt_cfg.get("time_budget", "unlimited"),
+        "n_trials": opt_cfg.get("n_trials", "auto"),
+        "levers_text": "\n".join(levers_desc),
+        "rules_text": "\n".join("- " + r for r in rules(project)),
+        "failure_history": _format_failure_history(project_dir, metric_name(project)),
+        "generation_history": _format_history(history[-5:]),
+        "escalation": escalation_msg,
+    }
 
 
 def _format_failure_history(project_dir: Path, metric_name: str) -> str:
@@ -229,87 +168,35 @@ def _check_escalation(history: list[dict[str, Any]]) -> str | None:
 
 
 def generate_hypotheses(project: dict[str, Any], project_dir: Path, provider: Any) -> bool:
-    """Generate new hypotheses using AI provider."""
-    from .project import (
-        project_name, project_description, metric_name, metric_direction,
-        levers, optimize_config, rules,
-    )
+    """Generate new hypotheses using metadata-driven pipeline.
 
-    levers_desc = []
-    for name, lever in levers(project).items():
-        if "flag" in lever:
-            levers_desc.append(f"  {name}: flag={lever['flag']}, baseline={lever['baseline']}, space={lever['space']}")
-        else:
-            levers_desc.append(f"  {name}: type={lever.get('type', 'choice')}, space={lever['space']}")
+    Each step runs as a separate LLM call with schema-validated output.
+    Step order is enforced by the pipeline engine, not by prompt instructions.
+    """
+    from .pipeline import run_pipeline
 
-    opt_cfg = optimize_config(project)
-    prompt = _GENERATE_PROMPT_TEMPLATE.format(
-        project_name=project_name(project),
-        project_description=project_description(project),
-        metric_name=metric_name(project),
-        metric_direction=metric_direction(project),
-        optimize_type=opt_cfg.get("type", "random"),
-        time_budget=opt_cfg.get("time_budget", "unlimited"),
-        n_trials=opt_cfg.get("n_trials", "auto"),
-        levers_text="\n".join(levers_desc),
-        rules_text="\n".join("- " + r for r in rules(project)),
-    )
-
-    # Inject generation history context
-    history = load_generate_history(project_dir)
-    history_text = _format_history(history[-5:])
-    if history_text:
-        prompt = history_text + "\n\n" + prompt
-
-    # Inject failure history so AI avoids repeating failed approaches
-    failure_text = _format_failure_history(project_dir, metric_name(project))
-    if failure_text:
-        prompt = failure_text + "\n\n" + prompt
-
-    # Code-level escalation: force SATURATED if stuck in EXPLORING/REFINING
-    forced = _check_escalation(history)
-    if forced:
-        escalation_msg = (
-            f"MANDATORY ESCALATION: Last cycles were {[h.get('state') for h in history[-3:]]}.\n"
-            f"You MUST classify as {forced} and take bold action:\n"
-            f"1. Review ALL failed experiments — what patterns caused LOSS/INVALID?\n"
-            f"2. Choose a fundamentally different approach (new algorithm, ensemble, feature engineering)\n"
-            f"3. Do NOT tweak the same levers as recent failures\n"
-            f"4. If levers are exhausted, ADD new levers to project.yaml"
-        )
-        prompt = escalation_msg + "\n\n" + prompt
-
-    summary_path = generate_summary_path(project_dir)
-    schema_path = Path(__file__).parent / "templates" / "codex" / "schemas" / "generate_summary.json"
+    pipeline_path = Path(__file__).parent / "templates" / "common" / "generate_pipeline.yaml"
+    context = _build_pipeline_context(project, project_dir)
 
     before = load_queue(project_dir)
 
-    try:
-        result = provider.run_structured(
-            prompt,
-            output_path=summary_path,
-            schema_path=schema_path,
-            tools=["Read", "Write", "Edit", "Bash", "WebSearch", "WebFetch"],
-            cwd=str(project_dir),
-        )
-        if result.returncode != 0:
-            log(f"GENERATE: {provider.name} exited with code {result.returncode}")
-            if result.stderr:
-                for line in result.stderr.strip().splitlines()[-10:]:
-                    log(f"GENERATE: stderr: {line}")
-    except RuntimeError as e:
-        log(f"GENERATE: {e}")
-        return False
+    result = run_pipeline(pipeline_path, context, provider, project_dir)
 
-    # Sanitize YAML: AI may have written unquoted colons or other YAML-unsafe text.
-    # Re-save through yaml.dump to ensure valid YAML.
+    if not result.success:
+        log(f"GENERATE: pipeline failed at step '{list(result.steps.keys())[-1] if result.steps else '?'}'")
+        # Still try to salvage any hypotheses that were added before failure
+        _sanitize_queue_yaml(project_dir)
+        after = load_queue(project_dir)
+        valid_count = _validate_new_entries(before, after, project_dir)
+        if valid_count > 0:
+            log(f"GENERATE: salvaged {valid_count} hypotheses from partial pipeline run")
+        _archive_generate_summary(project_dir, valid_count)
+        return valid_count > 0
+
+    # Post-processing (same as before)
     _sanitize_queue_yaml(project_dir)
-
-    # Validate new entries
     after = load_queue(project_dir)
     valid_count = _validate_new_entries(before, after, project_dir)
-
-    # Archive generation summary to history
     _archive_generate_summary(project_dir, valid_count)
 
     return valid_count > 0

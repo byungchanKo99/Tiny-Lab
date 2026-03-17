@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "required": ["techniques", "references"],
+  "properties": {
+    "techniques": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "List of relevant techniques, models, or approaches found"
+    },
+    "references": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Papers, blog posts, benchmarks cited"
+    },
+    "reasoning": {
+      "type": "string",
+      "description": "Summary of research findings"
+    }
+  }
+}

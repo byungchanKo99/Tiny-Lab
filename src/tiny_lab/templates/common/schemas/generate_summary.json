@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": [
+    "state",
+    "reasoning",
+    "best_so_far",
+    "hypotheses_added",
+    "changes_made",
+    "experiments_analyzed"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "state": {
+      "type": "string",
+      "enum": ["EXPLORING", "REFINING", "SATURATED", "STUCK"],
+      "description": "Diagnosed research state"
+    },
+    "reasoning": {
+      "type": "string",
+      "description": "2-3 sentence explanation of diagnosis and why these hypotheses were chosen"
+    },
+    "best_so_far": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["experiment_id", "metric_value", "config"],
+      "properties": {
+        "experiment_id": { "type": "string" },
+        "metric_value": { "type": "number" },
+        "config": {
+          "type": "string",
+          "description": "Brief description of best configuration"
+        }
+      }
+    },
+    "hypotheses_added": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "IDs of hypotheses added (e.g. H-006, H-007)"
+    },
+    "changes_made": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Changes to project.yaml or code (e.g. 'extended model lever space')"
+    },
+    "experiments_analyzed": {
+      "type": "integer",
+      "description": "Number of past experiments reviewed"
+    },
+    "references": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Techniques, papers, or prior experiments that inspired this generation cycle"
+    }
+  }
+}
