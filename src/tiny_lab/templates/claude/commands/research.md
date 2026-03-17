@@ -234,33 +234,36 @@ Which metric do you want to optimize? Are these the right levers?
 
 **Required fields checklist:**
 
-| #   | Field                                           | How to fill                                                                                                                         |
-| --- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | `name` (experiment name)                        | Infer from user intent. Propose, let user confirm.                                                                                  |
-| 2   | `description`                                   | Generate from intent. One sentence.                                                                                                 |
-| 3   | `metric.name` + `metric.direction`              | From ANALYZE metric candidates + user choice. Direction: "accuracy"/"score"/"revenue" → maximize, "loss"/"error"/"cost" → minimize. |
-| 4   | `baseline.command`                              | From script analysis (flags + defaults). If no script → ask user.                                                                   |
-| 5   | `levers` (name, flag, baseline, space for each) | From ANALYZE lever candidates + script flags. Propose search spaces from data ranges.                                               |
-| 6   | `run.type`                                      | Default: `command`. Only ask if user mentioned pipeline.                                                                            |
-| 7   | `evaluate.type`                                 | Default: `stdout_json`. Only ask if output isn't JSON (e.g., screenshots → `llm`).                                                  |
+| #   | Field                                    | How to fill                                                                                                                         |
+| --- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `name` (experiment name)                 | Infer from user intent. Propose, let user confirm.                                                                                  |
+| 2   | `description`                            | Generate from intent. One sentence.                                                                                                 |
+| 3   | `metric.name` + `metric.direction`       | From ANALYZE metric candidates + user choice. Direction: "accuracy"/"score"/"revenue" → maximize, "loss"/"error"/"cost" → minimize. |
+| 4   | `baseline.command`                       | From script analysis (flags + defaults). If no script → ask user.                                                                   |
+| 5   | `levers` (name, flag, baseline for each) | Map each hyperparameter to its CLI flag. Needed for optimizer to inject params.                                                     |
+| 6   | `search_space` (param types + ranges)    | Define parameter types and reasonable ranges for each hyperparameter. **MANDATORY.**                                                |
+| 7   | `optimize` (type, time_budget, n_trials) | Default: `type: random, time_budget: 300, n_trials: 20`. **MANDATORY.**                                                             |
+| 8   | `run.type`                               | Default: `command`. Only ask if user mentioned pipeline.                                                                            |
+| 9   | `evaluate.type`                          | Default: `stdout_json`. Only ask if output isn't JSON (e.g., screenshots → `llm`).                                                  |
 
 **Actions:**
 
 1. Check which fields are already filled from Phase 2 results + user responses
 2. For unfilled fields: **ask all missing fields in a single grouped question**. Do NOT ask one at a time.
-3. Fields 6 and 7 have safe defaults — do NOT ask about them unless the user's situation clearly needs a non-default value.
+3. Fields 8 and 9 have safe defaults — do NOT ask about them unless clearly needed.
 4. If no baseline script exists and user has data, offer: "baseline 스크립트를 만들어 드릴까요?"
+5. **CRITICAL**: When writing or modifying the experiment script, ensure it accepts hyperparameters as CLI flags (e.g., `--lr`, `--max_depth`). Without these flags, the optimizer cannot tune parameters.
 
 **Inference rules for auto-filling:**
 
-- Script with argparse flags → `build.type: flag`, extract levers from flags
-- Script without flags but user wants code changes → `build.type: code`
+- Script with argparse flags → `build.type: flag`, extract levers + search_space from flags
+- Script without flags → **add flags for key hyperparameters** before proceeding
 - User mentions "accuracy" or "score" → `metric.direction: maximize`
 - User mentions "loss" or "error" or "cost" → `metric.direction: minimize`
-- ANALYZE found categorical column with ≤10 values → `space: [all unique values]`
-- ANALYZE found numeric parameter → propose 4-5 values around the baseline (e.g., baseline=0.5 → space: [0.3, 0.5, 0.7, 1.0])
+- Numeric hyperparameter → `search_space` entry with type/low/high (e.g., `lr: {type: float, low: 0.001, high: 1.0, log: true}`)
+- Categorical parameter → `search_space` entry with choices (e.g., `model: {type: categorical, choices: [lgbm, xgb, rf]}`)
 
-**Exit condition:** All 7 fields filled → **update state file** with `phase: CONCRETIZE` and filled fields → go to **Phase 4: SETUP**
+**Exit condition:** All 9 fields filled (including search_space and optimize) → **update state file** with `phase: CONCRETIZE` and filled fields → go to **Phase 4: SETUP**
 
 ---
 
@@ -300,12 +303,22 @@ Which metric do you want to optimize? Are these the right levers?
      { lever_name }:
        flag: "{flag}"
        baseline: { baseline_value }
-       space: [{ values }]
+
+   search_space:
+     { param_name }: { type: float, low: 0.001, high: 1.0, log: true }
+     { param_name }: { type: int, low: 3, high: 15 }
+     { param_name }: { type: categorical, choices: [a, b, c] }
+
+   optimize:
+     type: random
+     time_budget: 300
+     n_trials: 20
 
    rules:
-     - "Change command-line flags only"
      - "Do not install packages"
    ```
+
+   **CRITICAL**: `search_space` and `optimize` are MANDATORY. Without them, the optimizer cannot tune hyperparameters and experiments run with fixed parameters only.
 
 3. **Write `research/questions.yaml`** — generate 2-3 research questions from levers:
 

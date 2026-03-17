@@ -9,8 +9,48 @@ You are not just a tool executor. You are the **research supervisor**. Your job:
 1. **Set up** the research (discovery mode → project.yaml → first hypotheses)
 2. **Start** the loop (`tiny-lab run &` — **MUST be background**, see below)
 3. **Monitor** the loop while it runs — check for problems, stalls, or exhausted search spaces
-4. **Evolve** the research — when current levers are exhausted, propose new directions
+4. **Evolve** the research — when current approaches are exhausted, propose new directions
 5. **Report** findings to the user when they return
+
+### MANDATORY: Optimizer Setup
+
+Every project MUST have `search_space` and `optimize` in project.yaml. Without these, experiments run with fixed parameters — the optimizer cannot tune hyperparameters.
+
+**When writing the experiment script (e.g., train.py):**
+
+- Accept hyperparameters as CLI flags (e.g., `--lr`, `--max_depth`, `--n_estimators`)
+- Use sensible defaults so the script works without flags (baseline)
+- Print the metric as JSON to stdout
+
+**When writing project.yaml:**
+
+- `search_space` defines parameter types and ranges — REQUIRED, not optional
+- `optimize` configures the optimizer (type, time_budget, n_trials) — REQUIRED
+- `levers` maps parameter names to CLI flags — needed for the optimizer to inject params
+
+Example:
+
+```yaml
+search_space:
+  lr: { type: float, low: 0.001, high: 1.0, log: true }
+  max_depth: { type: int, low: 3, high: 15 }
+  n_estimators: { type: int, low: 50, high: 500 }
+
+optimize:
+  type: random
+  time_budget: 300
+  n_trials: 20
+
+levers:
+  lr:
+    flag: "--lr"
+    baseline: 0.1
+  max_depth:
+    flag: "--max-depth"
+    baseline: 6
+```
+
+**DO NOT start the loop without search_space and optimize configured.**
 
 ### Two Research Modes
 

@@ -8,6 +8,17 @@ This project uses the `tiny-lab` autonomous research loop. The loop runs experim
 2. **Start** the loop (`tiny-lab run &` — **MUST be background**, it runs forever)
 3. **Report** findings to the user when they return
 
+### MANDATORY: Optimizer Setup
+
+Every project MUST have `search_space` and `optimize` in project.yaml.
+
+- `search_space` defines parameter types and ranges (e.g., `lr: {type: float, low: 0.001, high: 1.0}`)
+- `optimize` configures the optimizer (e.g., `type: random, time_budget: 300, n_trials: 20`)
+- The experiment script MUST accept hyperparameters as CLI flags (e.g., `--lr`, `--max_depth`)
+
+Without these, experiments run with fixed parameters and the optimizer is skipped.
+**DO NOT start the loop without search_space and optimize configured.**
+
 ### CRITICAL: `tiny-lab run` is an INFINITE LOOP
 
 **`tiny-lab run` runs forever.** It continuously picks hypotheses, runs experiments, generates new hypotheses, and repeats indefinitely.
