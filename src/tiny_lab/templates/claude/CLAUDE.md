@@ -145,7 +145,7 @@ tiny-lab run &
     ├─ Builds command (flag substitution or code changes)
     ├─ OPTIMIZE: runs inner loop (if search_space defined)
     │   └─ Built-in: grid | random | custom (external tools)
-    │   └─ No search_space → single run (classic behavior)
+    │   └─ No search_space → single run (no param tuning needed)
     ├─ Evaluates result → WIN/LOSS/INVALID
     ├─ Records to ledger.jsonl
     ├─ Picks next hypothesis...
