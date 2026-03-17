@@ -204,23 +204,7 @@ tiny-lab status && tiny-lab board
 
 ### Adding Hypotheses Manually
 
-There are two hypothesis formats. Use **v2** when `optimize:` is configured in project.yaml, otherwise use **v1**.
-
-#### v1 — Single-lever (classic)
-
-```yaml
-- id: H-001
-  status: pending
-  lever: learning_rate
-  value: "0.05"
-  description: "Lower learning rate to 0.05"
-```
-
-Required fields: `id`, `status`, `lever`, `value`, `description`.
-
-#### v2 — Strategic approach (when `optimize:` is configured)
-
-Parameter types are defined once in `project.yaml` under `search_space:`. Hypotheses only pick the approach.
+Each hypothesis picks an **approach** (strategy). The optimizer handles parameter tuning using `search_space` defined in project.yaml.
 
 ```yaml
 - id: H-001
@@ -233,9 +217,10 @@ Parameter types are defined once in `project.yaml` under `search_space:`. Hypoth
 Required fields: `id`, `status`, `approach`, `description`.
 Optional: `search_space` (only for approach-specific params not in project.yaml), `reasoning`, `code_changes`, `references`, `optimize_type`.
 
-**Key principle:** YOU decide the **strategy** (approach), the **optimizer** decides the **parameters**. Parameter types and ranges are defined in `project.yaml` `search_space:`, not per hypothesis.
+**Key principle:** YOU decide the **strategy** (approach), the **optimizer** decides the **parameters**.
 
 - DO: `approach: xgboost_stacking` (optimizer uses project-level search_space)
+- DON'T: Specify exact parameter values — that's the optimizer's job
 - DON'T: Define search_space per hypothesis unless adding approach-specific params
 - NEVER: Same approach + different ranges = NOT a new hypothesis
 
@@ -271,29 +256,7 @@ The `research/project.yaml` file controls the experiment. Key sections:
 
 ### Ledger Entry (research/ledger.jsonl)
 
-Each line is a JSON object. v1 and v2 hypotheses produce slightly different entries:
-
-**v1 (single-lever):**
-
-```json
-{
-  "id": "EXP-001",
-  "question": "Lower learning rate from 0.02 to 0.01",
-  "family": "project-name",
-  "changed_variable": "learning_rate",
-  "value": 0.01,
-  "status": "done",
-  "class": "WIN",
-  "primary_metric": {
-    "metric_name": 1.23,
-    "baseline": 1.45,
-    "delta_pct": -15.17
-  },
-  "decision": "win"
-}
-```
-
-**v2 (optimized approach):**
+Each line is a JSON object:
 
 ```json
 {
@@ -314,6 +277,8 @@ Each line is a JSON object. v1 and v2 hypotheses produce slightly different entr
   "decision": "win"
 }
 ```
+
+`optimize_result` is present when the optimizer ran trials for the approach.
 
 `class` is one of: `WIN`, `LOSS`, `INVALID`, `INCONCLUSIVE`, `BASELINE`.
 

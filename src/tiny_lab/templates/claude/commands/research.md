@@ -322,9 +322,7 @@ Which metric do you want to optimize? Are these the right levers?
 
 4. **Write `research/hypothesis_queue.yaml`** — generate 3-5 hypotheses.
 
-   **If `optimize:` is configured in project.yaml → use v2 format:**
-
-   Parameter types are already defined in `project.yaml` `search_space:`. Hypotheses only pick the approach — do NOT repeat search_space per hypothesis.
+   Each hypothesis picks an **approach** (strategy). The optimizer handles parameter tuning from `project.yaml` `search_space:`.
 
    ```yaml
    hypotheses:
@@ -340,18 +338,7 @@ Which metric do you want to optimize? Are these the right levers?
        reasoning: "Nonlinear model to capture feature interactions"
    ```
 
-   v2 key principle: YOU pick the **strategy** (approach), the **optimizer** picks the **parameters** from `project.yaml` `search_space:`. Same approach + different ranges is NOT a new hypothesis.
-
-   **Otherwise → use v1 format:**
-
-   ```yaml
-   hypotheses:
-     - id: H-001
-       status: pending
-       lever: { lever_name }
-       value: { value_from_space }
-       description: "{one line description}"
-   ```
+   Key principle: YOU pick the **strategy** (approach), the **optimizer** picks the **parameters**. Do NOT specify exact parameter values.
 
 5. **Verify baseline** — run the baseline command and check output:
    - Parse stdout for JSON containing `metric.name`

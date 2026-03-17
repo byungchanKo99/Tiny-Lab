@@ -77,23 +77,9 @@ The loop is designed to run indefinitely. **You must NEVER:**
 
 **If you think experiments are "enough"** — you're wrong. Let the loop continue.
 
-## Hypothesis Formats
+## Hypothesis Format
 
-There are two hypothesis formats. Use **v2** when `optimize:` is configured in `research/project.yaml`.
-
-### v1 — Single-lever (classic)
-
-```yaml
-- id: H-001
-  status: pending
-  lever: learning_rate
-  value: "0.05"
-  description: "Lower learning rate to 0.05"
-```
-
-### v2 — Strategic approach (when `optimize:` is configured)
-
-Parameter types are defined in `project.yaml` `search_space:`. Hypotheses only pick the approach.
+Each hypothesis picks an **approach** (strategy). The optimizer handles parameter tuning using `search_space` from `project.yaml`.
 
 ```yaml
 - id: H-001
@@ -103,11 +89,13 @@ Parameter types are defined in `project.yaml` `search_space:`. Hypotheses only p
   reasoning: "Combine gradient boosting variants for better generalization"
 ```
 
-**v2 key principle:** YOU decide the **strategy** (approach). The **optimizer** decides the **parameters** using `project.yaml` `search_space:`.
+Required: `id`, `status`, `approach`, `description`.
+Optional: `search_space` (approach-specific params not in project.yaml), `reasoning`, `code_changes`, `references`.
+
+**Key principle:** YOU decide the **strategy** (approach). The **optimizer** decides the **parameters**.
 
 - DO: Pick a new model family, ensemble method, or feature engineering approach
-- DON'T: Define `search_space` per hypothesis (it's in project.yaml)
-- DON'T: Specify exact parameter values like `lever: lr, value: 0.05`
+- DON'T: Specify exact parameter values — the optimizer handles this
 - NEVER: Same approach + different ranges = NOT a new hypothesis
 
 ## GENERATE Phase: Output Schema

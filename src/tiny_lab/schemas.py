@@ -165,8 +165,8 @@ def validate_hypothesis_entry(entry: dict[str, Any], *, strict: bool = True) -> 
     """Validate a single hypothesis entry.
 
     Supports two formats:
-    - v1: lever + value (traditional flag-based)
-    - v2: approach + optional search_space (strategy-based)
+    - v1 (deprecated): lever + value (traditional flag-based)
+    - v2 (preferred): approach (strategy-based, optimizer handles params)
     At least one format must be present.
     """
     errors = validate(entry, "hypothesis_entry", strict=False)
