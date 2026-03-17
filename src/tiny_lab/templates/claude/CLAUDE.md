@@ -190,12 +190,23 @@ tiny-lab status && tiny-lab board
 
 ## Workflow
 
+### Dependencies
+
+Before starting the loop, ensure all required packages are installed:
+
+- **Experiment script dependencies** — whatever your train/eval script needs (e.g., scikit-learn, xgboost, lightgbm)
+- **Optimizer dependencies** — if `optimize.type` is `optuna`, install optuna (`pip install optuna`). Custom optimizers may need their own packages.
+- **Evaluation tool dependencies** — if using custom evaluation (e.g., UI testing tools, browser automation), install those too.
+
+The loop will fail at runtime if dependencies are missing. **Install them before starting `tiny-lab run`.**
+
 ### Starting a New Experiment
 
-1. Edit `research/project.yaml` — set baseline command, metric name, levers with search spaces
+1. Edit `research/project.yaml` — set baseline command, metric name, search_space
 2. Add hypotheses to `research/hypothesis_queue.yaml` (or run `tiny-lab generate`)
-3. Start the loop: `CYCLE_SLEEP=1 tiny-lab run > research/tiny_lab_run.out 2>&1 &`
-4. Monitor: `tiny-lab status` then `tiny-lab board` — repeat every 2-5 minutes
+3. Install dependencies needed by your experiment script and optimizer
+4. Start the loop: `CYCLE_SLEEP=1 tiny-lab run > research/tiny_lab_run.out 2>&1 &`
+5. Monitor: `tiny-lab status` then `tiny-lab board` — repeat every 2-5 minutes
 
 ### Checking Results
 

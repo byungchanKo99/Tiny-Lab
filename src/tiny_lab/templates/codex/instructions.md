@@ -42,6 +42,16 @@ Report **ALL** experiments (initial + auto-generated):
 - Whether loop is still running
 - Recommended next steps
 
+## Dependencies
+
+Before starting the loop, install all required packages:
+
+- **Experiment script** — whatever your script needs (sklearn, xgboost, etc.)
+- **Optimizer** — if using optuna, install it (`pip install optuna`). Custom optimizers may need their own packages.
+- **Evaluation tools** — custom eval tools (UI testing, browser automation, etc.)
+
+The loop fails at runtime if dependencies are missing. **Install before `tiny-lab run`.**
+
 ## CLI Commands
 
 ```bash
