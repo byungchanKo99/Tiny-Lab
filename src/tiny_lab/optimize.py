@@ -432,7 +432,7 @@ def dispatch_optimize(
     )
 
     # Time budget and trial count
-    time_budget = opt_cfg.get("time_budget")
+    time_budget = opt_cfg.get("time_budget", 300)  # default 5 minutes
     n_trials = opt_cfg.get("n_trials")
 
     log(f"OPTIMIZE: dispatching {opt_type} for {hypothesis.get('id', '?')} "

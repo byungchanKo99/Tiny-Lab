@@ -36,8 +36,8 @@ levers:
 
 # optimize:
 #   type: random          # grid|random|custom
-#   time_budget: 300      # seconds per hypothesis
-#   n_trials: null         # max trials (null = time-budget only)
+#   time_budget: 300      # seconds per hypothesis (default: 300 = 5 min)
+#   n_trials: 20          # max trials (default: 20)
 
 # search_space:           # Parameter type definitions — optimizer searches within these
 #   lr: {type: float, low: 0.001, high: 1.0, log: true}
