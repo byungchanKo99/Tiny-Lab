@@ -47,7 +47,7 @@ Report **ALL** experiments (initial + auto-generated):
 Before starting the loop, install all required packages:
 
 - **Experiment script** — whatever your script needs (sklearn, xgboost, etc.)
-- **Optimizer** — if using optuna, install it (`pip install optuna`). Custom optimizers may need their own packages.
+- **Optimizer** — if using `custom` optimizer, install whatever the optimizer script needs.
 - **Evaluation tools** — custom eval tools (UI testing, browser automation, etc.)
 
 The loop fails at runtime if dependencies are missing. **Install before `tiny-lab run`.**

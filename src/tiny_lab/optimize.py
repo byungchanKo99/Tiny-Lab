@@ -1,8 +1,9 @@
 """Pluggable inner-loop optimizers for hypothesis search spaces.
 
-Dispatches to optuna (TPE), grid, random, or custom optimizers based on
-hypothesis or project configuration. Each optimizer runs N trials of the
-base experiment command with varied parameters and returns the best result.
+Built-in optimizers (no external deps): grid, random.
+External tools (optuna, etc.): use optimize_type: custom + optimize_script.
+Each optimizer runs N trials of the base experiment command with varied
+parameters and returns the best result.
 """
 from __future__ import annotations
 
@@ -304,98 +305,6 @@ def _run_grid(
     )
 
 
-def _run_optuna(
-    project: dict[str, Any],
-    base_command: str,
-    search_space: dict[str, dict[str, Any]],
-    project_dir: Path,
-    exp_id: str,
-    *,
-    n_trials: int | None = None,
-    time_budget: int | None = None,
-) -> OptimizeResult:
-    """Optuna TPE optimizer — requires optuna (lazy import)."""
-    try:
-        import optuna
-    except ImportError:
-        raise OptimizeError("optuna is not installed. Install with: pip install tiny-lab[optimize]")
-
-    optuna.logging.set_verbosity(optuna.logging.WARNING)
-
-    metric_name = project["metric"]["name"]
-    direction = project["metric"].get("direction", "minimize")
-    optuna_direction = "minimize" if direction == "minimize" else "maximize"
-
-    best_stdout = ""
-    best_stderr = ""
-    all_trials: list[dict[str, Any]] = []
-    start = time.monotonic()
-
-    def objective(trial: optuna.Trial) -> float:
-        nonlocal best_stdout, best_stderr
-        params: dict[str, Any] = {}
-        for name, spec in search_space.items():
-            if spec["type"] == "categorical":
-                params[name] = trial.suggest_categorical(name, spec["choices"])
-            elif spec["type"] == "int":
-                params[name] = trial.suggest_int(name, int(spec["low"]), int(spec["high"]),
-                                                  step=spec.get("step", 1),
-                                                  log=spec.get("log", False))
-            elif spec["type"] == "float":
-                params[name] = trial.suggest_float(name, spec["low"], spec["high"],
-                                                    step=spec.get("step"),
-                                                    log=spec.get("log", False))
-
-        cmd = build_trial_command(base_command, params, project)
-        result = _run_single_trial(project, cmd, exp_id, trial.number, project_dir)
-        value = _extract_trial_metric(result, metric_name)
-
-        trial_record = {"params": params, "value": value, "state": "complete" if value is not None else "fail"}
-        all_trials.append(trial_record)
-
-        if value is None:
-            raise optuna.TrialPruned("No metric extracted")
-
-        return value
-
-    study = optuna.create_study(direction=optuna_direction)
-    study.optimize(
-        objective,
-        n_trials=n_trials or 20,
-        timeout=time_budget,
-        show_progress_bar=False,
-    )
-
-    total_seconds = time.monotonic() - start
-
-    if study.best_trial:
-        best_value = study.best_value
-        best_params = study.best_params
-        # Re-run best to capture stdout (or find from trials)
-        best_idx = study.best_trial.number
-        if best_idx < len(all_trials) and all_trials[best_idx]["value"] is not None:
-            # Reconstruct command for best stdout
-            cmd = build_trial_command(base_command, best_params, project)
-            re_result = _run_single_trial(project, cmd, exp_id, len(all_trials), project_dir)
-            if re_result:
-                best_stdout = re_result.stdout
-                best_stderr = re_result.stderr
-    else:
-        best_value = None
-        best_params = {}
-
-    log(f"OPTIMIZE[optuna]: {len(all_trials)} trials in {total_seconds:.1f}s, best={best_value}")
-
-    return OptimizeResult(
-        best_value=best_value,
-        best_params=best_params,
-        n_trials=len(all_trials),
-        total_seconds=total_seconds,
-        all_trials=all_trials,
-        best_stdout=best_stdout,
-        best_stderr=best_stderr,
-    )
-
 
 def _run_custom(
     project: dict[str, Any],
@@ -473,9 +382,15 @@ def _run_custom(
 # ---------------------------------------------------------------------------
 
 def _get_optimizer(opt_type: str) -> Any:
-    """Look up optimizer function by name (allows patching in tests)."""
+    """Look up built-in optimizer function by name.
+
+    Built-in optimizers (no external dependencies):
+    - random: random sampling
+    - grid: exhaustive grid search
+
+    For external tools (optuna, etc.), use optimize_type: custom + optimize_script.
+    """
     optimizers = {
-        "optuna": _run_optuna,
         "grid": _run_grid,
         "random": _run_random,
     }
@@ -494,7 +409,7 @@ def dispatch_optimize(
     Priority:
     1. hypothesis.optimize_type (per-hypothesis override)
     2. project.optimize.type (project default)
-    3. 'optuna' fallback (falls back to 'random' if optuna not installed)
+    3. 'random' fallback
 
     Returns None if no search_space is defined.
     """
@@ -512,7 +427,7 @@ def dispatch_optimize(
     opt_type = (
         hypothesis.get("optimize_type")
         or optimize_config.get("type")
-        or "optuna"
+        or "random"
     )
 
     # Time budget and trial count
@@ -527,16 +442,6 @@ def dispatch_optimize(
             project, base_command, search_space, project_dir, exp_id, hypothesis,
             time_budget=time_budget,
         )
-
-    if opt_type == "optuna":
-        try:
-            return _run_optuna(
-                project, base_command, search_space, project_dir, exp_id,
-                n_trials=n_trials, time_budget=time_budget,
-            )
-        except OptimizeError:
-            log("OPTIMIZE: optuna not available, falling back to random")
-            opt_type = "random"
 
     optimizer = _get_optimizer(opt_type)
     if optimizer is None:

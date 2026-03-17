@@ -144,7 +144,7 @@ tiny-lab run &
     ├─ Picks pending hypothesis from queue
     ├─ Builds command (flag substitution or code changes)
     ├─ OPTIMIZE: runs inner loop (if search_space defined)
-    │   └─ Pluggable: optuna | grid | random | custom
+    │   └─ Built-in: grid | random | custom (external tools)
     │   └─ No search_space → single run (classic behavior)
     ├─ Evaluates result → WIN/LOSS/INVALID
     ├─ Records to ledger.jsonl
@@ -195,7 +195,7 @@ tiny-lab status && tiny-lab board
 Before starting the loop, ensure all required packages are installed:
 
 - **Experiment script dependencies** — whatever your train/eval script needs (e.g., scikit-learn, xgboost, lightgbm)
-- **Optimizer dependencies** — if `optimize.type` is `optuna`, install optuna (`pip install optuna`). Custom optimizers may need their own packages.
+- **Optimizer dependencies** — if `optimize.type` is `custom`, install whatever the optimizer script needs.
 - **Evaluation tool dependencies** — if using custom evaluation (e.g., UI testing tools, browser automation), install those too.
 
 The loop will fail at runtime if dependencies are missing. **Install them before starting `tiny-lab run`.**

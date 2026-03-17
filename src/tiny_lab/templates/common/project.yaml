@@ -35,7 +35,7 @@ levers:
 #   max_total_seconds: 330
 
 # optimize:
-#   type: optuna          # optuna|grid|random|custom
+#   type: random          # grid|random|custom
 #   time_budget: 300      # seconds per hypothesis
 #   n_trials: null         # max trials (null = time-budget only)
 

@@ -28,7 +28,7 @@ Lifecycle:
 The loop is an INFINITE state machine:
   CHECK_QUEUE → SELECT → BUILD → OPTIMIZE → EVALUATE → RECORD → CHECK_QUEUE
   When queue empties → GENERATE (AI creates new hypotheses) → CHECK_QUEUE
-  OPTIMIZE runs inner loop (optuna/grid/random) if search_space defined, else single RUN
+  OPTIMIZE runs inner loop (grid/random/custom) if search_space defined, else single RUN
 
 Environment variables:
   CYCLE_SLEEP     Seconds between experiment cycles (default: 30, recommend: 1)

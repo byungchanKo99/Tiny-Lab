@@ -140,7 +140,7 @@ Each hypothesis MUST have:
 Optional:
 - search_space: {{extra params specific to this approach, not already in project.yaml}}
 - code_changes: "description of script changes needed" (triggers BUILD[code])
-- optimize_type: "optuna|grid|random|custom" (override project default)
+- optimize_type: "grid|random|custom" (override project default)
 - references: ["papers", "URLs"]
 
 Example:
@@ -243,7 +243,7 @@ def generate_hypotheses(project: dict[str, Any], project_dir: Path, provider: An
         project_description=project.get("description", ""),
         metric_name=project["metric"]["name"],
         metric_direction=project["metric"].get("direction", "minimize"),
-        optimize_type=opt_cfg.get("type", "optuna"),
+        optimize_type=opt_cfg.get("type", "random"),
         time_budget=opt_cfg.get("time_budget", "unlimited"),
         n_trials=opt_cfg.get("n_trials", "auto"),
         levers_text="\n".join(levers_desc),

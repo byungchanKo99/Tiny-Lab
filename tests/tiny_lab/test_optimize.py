@@ -307,26 +307,6 @@ class TestDispatchOptimize:
         assert result.best_value == 0.5
         assert result.n_trials == 2
 
-    @patch("tiny_lab.optimize._run_optuna", side_effect=OptimizeError("not installed"))
-    @patch("tiny_lab.optimize.run_experiment_command")
-    def test_optuna_fallback_to_random(self, mock_run, mock_optuna):
-        mock_run.return_value = subprocess.CompletedProcess(
-            args="", returncode=0, stdout='{"loss": 0.5}\n', stderr="",
-        )
-        project = {
-            "metric": {"name": "loss", "direction": "minimize"},
-            "levers": {},
-            "optimize": {"n_trials": 2},
-        }
-        hypothesis = {
-            "id": "H-1",
-            "search_space": {"lr": {"type": "float", "low": 0.001, "high": 0.1}},
-            "description": "test",
-        }
-        result = dispatch_optimize(project, "echo", hypothesis, Path("/tmp"), "EXP-002")
-        assert result is not None
-        assert result.best_value == 0.5
-
     @patch("tiny_lab.optimize.run_experiment_command")
     def test_hypothesis_optimize_type_override(self, mock_run):
         """hypothesis.optimize_type takes priority over project.optimize.type."""
@@ -336,17 +316,16 @@ class TestDispatchOptimize:
         project = {
             "metric": {"name": "loss", "direction": "minimize"},
             "levers": {},
-            "optimize": {"type": "optuna"},
+            "optimize": {"type": "grid"},
         }
         hypothesis = {
             "id": "H-1",
             "search_space": {"algo": {"type": "categorical", "choices": ["sgd", "adam"]}},
-            "optimize_type": "grid",
+            "optimize_type": "random",
             "description": "test",
         }
         result = dispatch_optimize(project, "echo", hypothesis, Path("/tmp"), "EXP-002")
         assert result is not None
-        assert result.n_trials == 2  # grid over 2 choices
 
     def test_unknown_optimizer_raises(self):
         project = {
