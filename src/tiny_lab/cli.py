@@ -435,15 +435,16 @@ def _format_board(data: dict[str, Any]) -> None:
 
     recent = ledger[-10:]
     if recent:
-        print(f"{'ID':<10} {'Verdict':<10} {metric_name:<12} {'Delta%':<10} {'Changes (diff from baseline)'}")
-        print("-" * 120)
+        print(f"{'ID':<10} {'Verdict':<10} {metric_name:<12} {'Delta%':<10} {'Changes':<35} {'Reasoning'}")
+        print("-" * 130)
         for row in recent:
             pm = row.get("primary_metric", {})
             val = pm.get(metric_name, "N/A")
             delta = pm.get("delta_pct", "N/A")
-            diff = row.get("_diff", "")
+            diff = row.get("_diff", "")[:34]
+            reasoning = (row.get("reasoning", "") or row.get("question", ""))[:45]
             best_params = row.get("_best_params_str", "")
-            print(f"{row.get('id', '?'):<10} {row.get('class', '?'):<10} {str(val):<12} {str(delta):<10} {diff}")
+            print(f"{row.get('id', '?'):<10} {row.get('class', '?'):<10} {str(val):<12} {str(delta):<10} {diff:<35} {reasoning}")
             if best_params:
                 print(f"{'':>10} {'':>10} {'':>12} {'':>10} best_params: {best_params}")
     else:

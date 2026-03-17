@@ -68,7 +68,7 @@ _HTML_TEMPLATE = """\
 <div class="card">
   <h2>Experiment Log</h2>
   <table>
-    <thead><tr><th>ID</th><th>Verdict</th><th>{metric_name}</th><th>Delta%</th><th>Changes (diff)</th><th>Best Params</th></tr></thead>
+    <thead><tr><th>ID</th><th>Verdict</th><th>{metric_name}</th><th>Delta%</th><th>Changes (diff)</th><th>Best Params</th><th>Reasoning</th></tr></thead>
     <tbody id="logBody"></tbody>
   </table>
 </div>
@@ -182,10 +182,11 @@ DATA.ledger.slice().reverse().forEach(r => {{
   const cls = (r.class || '').toLowerCase();
   const diff = r._diff || '';
   const bestParams = r._best_params_str || '';
+  const reasoning = (r.reasoning || r.question || '').slice(0, 60);
   tbody.innerHTML += `<tr>
     <td>${{r.id}}</td><td class="${{cls}}">${{r.class}}</td>
     <td>${{pm[DATA.metric_name] ?? 'N/A'}}</td><td>${{pm.delta_pct ?? 'N/A'}}</td>
-    <td>${{diff}}</td><td>${{bestParams}}</td></tr>`;
+    <td>${{diff}}</td><td>${{bestParams}}</td><td>${{reasoning}}</td></tr>`;
 }});
 
 // Optimization Summary
