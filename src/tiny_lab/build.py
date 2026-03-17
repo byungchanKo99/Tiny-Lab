@@ -132,12 +132,12 @@ def dispatch_build(
                 hint = " (did you mean 'lever' instead of 'changed_variable'?)"
             raise BuildError(
                 f"Hypothesis {hypothesis.get('id', '?')} missing 'lever' field{hint}. "
-                f"v1 format requires 'lever' + 'value'. v2 requires 'approach'."
+                f"Use 'approach' for strategy-based hypotheses, or 'lever' + 'value' for flag-based."
             )
         if "value" not in hypothesis:
             raise BuildError(
                 f"Hypothesis {hypothesis.get('id', '?')} missing 'value' field. "
-                f"v1 format requires 'lever' + 'value'."
+                f"Flag-based hypotheses require 'lever' + 'value'."
             )
 
         value = hypothesis["value"]

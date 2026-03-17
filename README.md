@@ -1,12 +1,14 @@
 # tiny-lab
 
-Deterministic AI-driven research loop. Define levers, set a metric, and let the loop run experiments automatically.
+Deterministic AI-driven research loop. Define approaches, set a metric, and let the loop run experiments automatically.
 
 ```
-┌─ CHECK_QUEUE ──→ SELECT ──→ BUILD ──→ RUN ──→ EVALUATE ──→ RECORD ─┐
-│                                                                      │
-│  (queue empty + infinite mode)                                       │
-└──→ GENERATE (AI creates new hypotheses) ──→ back to CHECK_QUEUE ────┘
+┌─ CHECK_QUEUE ──→ SELECT ──→ BUILD ──→ OPTIMIZE ──→ EVALUATE ──→ RECORD ─┐
+│                                          │                                │
+│                         search_space? → grid/random/custom optimizer      │
+│                         no search_space? → single run                     │
+│  (queue empty + infinite mode)                                            │
+└──→ GENERATE (AI pipeline: research→analyze→diagnose→hypotheses→summary) ──┘
 ```
 
 ## Install
@@ -52,12 +54,12 @@ Both modes **must** run in background (`&`). Infinite mode never exits on its ow
 
 ## How It Works
 
-1. **Pick** a hypothesis from the queue
-2. **Build** the experiment command (replace CLI flags, modify code, or run a script)
-3. **Run** the experiment (shell command or multi-step pipeline)
+1. **Pick** a hypothesis (approach) from the queue
+2. **Build** the experiment command (flag substitution, code modification, or script)
+3. **Optimize** — if `search_space` is defined, run inner loop (grid/random/custom) to find best params; otherwise single run
 4. **Evaluate** the result (parse stdout JSON, run eval script, or AI scoring)
 5. **Record** WIN / LOSS / INVALID to the append-only ledger
-6. **Repeat** — in infinite mode, GENERATE creates new hypotheses when the queue empties
+6. **Repeat** — in infinite mode, GENERATE pipeline creates new hypotheses when the queue empties
 
 The loop halts on **circuit breaker** (5 INVALID in last 20 experiments) or `tiny-lab stop`.
 
@@ -91,7 +93,7 @@ build:
   type: flag # flag | script | code
 
 run:
-  type: command # command | surface | pipeline
+  type: command # command | pipeline
 
 evaluate:
   type: stdout_json # stdout_json | script | llm
@@ -108,10 +110,16 @@ levers:
     flag: "--rate-adj"
     baseline: 1.0
     space: [0.8, 0.9, 1.0, 1.1, 1.2]
-  season_weight:
-    flag: "--season-weight"
-    baseline: 0.5
-    space: [0.3, 0.5, 0.7, 1.0]
+
+# Parameter type definitions — optimizer searches within these
+search_space:
+  rate_adj: { type: float, low: 0.5, high: 2.0 }
+  season_weight: { type: float, low: 0.1, high: 1.0 }
+
+# Optimizer config (built-in: grid, random; external: custom)
+optimize:
+  type: random
+  n_trials: 20
 
 rules:
   - "Change command-line flags only"
@@ -168,15 +176,15 @@ your-project/
 
 25 modules organized in layers:
 
-| Layer         | Modules                                                   |
-| ------------- | --------------------------------------------------------- |
-| **Entry**     | `cli`                                                     |
-| **Core**      | `loop` (state machine)                                    |
-| **Logic**     | `generate`, `build`, `run`, `evaluate`, `baseline`        |
-| **Data**      | `project`, `queue`, `ledger`, `schemas`, `migrate`        |
-| **Query**     | `dashboard`, `report`                                     |
-| **Infra**     | `paths`, `errors`, `logging`, `lock`, `events`, `envutil` |
-| **Providers** | `claude`, `codex` (via abstract `AIProvider`)             |
+| Layer         | Modules                                                                    |
+| ------------- | -------------------------------------------------------------------------- |
+| **Entry**     | `cli`                                                                      |
+| **Core**      | `loop` (state machine)                                                     |
+| **Logic**     | `generate`, `pipeline`, `build`, `run`, `optimize`, `evaluate`, `baseline` |
+| **Data**      | `project`, `queue`, `ledger`, `schemas`, `migrate`                         |
+| **Query**     | `dashboard`, `report`                                                      |
+| **Infra**     | `paths`, `errors`, `logging`, `lock`, `events`, `envutil`                  |
+| **Providers** | `claude`, `codex` (via abstract `AIProvider`)                              |
 
 Schema versioning with auto-migration (v1 → v2). See `docs/architecture.md` for detailed diagrams.
 
@@ -187,7 +195,7 @@ pip install -e ".[dev]"
 pytest tests/tiny_lab/
 ```
 
-193 tests across 12 test files covering state machine transitions, plugin dispatch, schema migration, event system, multi-lever experiments, error recovery, and circuit breaker.
+246 tests covering state machine transitions, plugin dispatch, optimizer inner loop, pipeline engine, schema migration, event system, error recovery, and circuit breaker.
 
 ## Credits
 

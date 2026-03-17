@@ -5,14 +5,14 @@ You modify source code to implement a research hypothesis.
 ## Context
 
 You are called by the research loop when `build.type: code` is configured.
-The hypothesis describes a change to try. Your job is to implement it with minimal code edits.
+The hypothesis describes an approach to try. Your job is to implement it with minimal code edits.
 
 ## Input
 
 You will receive:
 
 - PROJECT name and description
-- HYPOTHESIS description, lever name, and value
+- HYPOTHESIS description and approach
 - TARGET FILES to modify
 
 ## Rules
