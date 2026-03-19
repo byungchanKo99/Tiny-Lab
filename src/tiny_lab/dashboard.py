@@ -144,6 +144,15 @@ def build_board_data(project_dir: Path) -> dict[str, Any] | None:
         project = load_project(project_dir)
     except FileNotFoundError:
         return None
+    except Exception as e:
+        # Validation errors etc. should not crash the dashboard
+        from .logging import log
+        log(f"DASHBOARD: project.yaml has issues: {e}")
+        # Load raw YAML without validation so board still works
+        import yaml
+        from .paths import project_yaml_path
+        raw = yaml.safe_load(project_yaml_path(project_dir).read_text()) or {}
+        project = raw
 
     metric_name = project["metric"]["name"]
     direction = project["metric"].get("direction", "minimize")

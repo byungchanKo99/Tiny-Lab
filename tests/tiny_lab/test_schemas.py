@@ -141,11 +141,12 @@ class TestValidateProjectDeep:
         errors = validate_project_deep(proj, strict=False)
         assert any("baseline.command" in e for e in errors)
 
-    def test_lever_missing_space(self):
+    def test_lever_without_space_is_valid(self):
+        """Levers no longer require 'space' — search_space handles param ranges."""
         proj = self._minimal_project()
-        proj["levers"]["lr"] = {"flag": "--lr"}
+        proj["levers"]["lr"] = {"flag": "--lr", "baseline": 0.1}
         errors = validate_project_deep(proj, strict=False)
-        assert any("space" in e for e in errors)
+        assert not any("space" in e for e in errors)
 
     def test_lever_not_dict(self):
         proj = self._minimal_project()

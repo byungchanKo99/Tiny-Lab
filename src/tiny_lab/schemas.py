@@ -218,8 +218,6 @@ def validate_project_deep(data: dict[str, Any], *, strict: bool = True) -> list[
         for lever_name, lever in data["levers"].items():
             if not isinstance(lever, dict):
                 errors.append(f"lever '{lever_name}': expected dict")
-            elif "space" not in lever:
-                errors.append(f"lever '{lever_name}': missing 'space'")
 
     if errors and strict:
         raise ValidationError(errors, "project_config")
