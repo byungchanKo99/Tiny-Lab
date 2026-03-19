@@ -315,7 +315,7 @@ Which metric do you want to optimize? Are these the right levers?
      n_trials: 20
 
    rules:
-     - "Do not install packages"
+     - "Install required dependencies before starting the loop"
    ```
 
    **CRITICAL**: `search_space` and `optimize` are MANDATORY. Without them, the optimizer cannot tune hyperparameters and experiments run with fixed parameters only.
