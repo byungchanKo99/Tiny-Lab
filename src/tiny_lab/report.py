@@ -67,6 +67,14 @@ _HTML_TEMPLATE = """\
 
 <div class="grid" id="insightsGrid" style="margin-bottom:1.5rem;"></div>
 
+<div class="card" id="queueCard" style="display:none;">
+  <h2>Pending Queue</h2>
+  <table>
+    <thead><tr><th>Status</th><th>ID</th><th>Approach</th><th>Description</th></tr></thead>
+    <tbody id="queueBody"></tbody>
+  </table>
+</div>
+
 <div class="card">
   <h2>Experiment Log</h2>
   <table>
@@ -196,6 +204,17 @@ if (ig) {{
   }});
 }}
 
+// Pending queue
+const pq = DATA.pending_queue || [];
+if (pq.length > 0) {{
+  document.getElementById('queueCard').style.display = '';
+  const qb = document.getElementById('queueBody');
+  pq.forEach(h => {{
+    const marker = h.status === 'running' ? '▶' : '⏳';
+    qb.innerHTML += `<tr><td>${{marker}}</td><td>${{h.id}}</td><td>${{h.approach}}</td><td>${{h.description}}</td></tr>`;
+  }});
+}}
+
 // Populate log table
 const tbody = document.getElementById('logBody');
 DATA.ledger.slice().reverse().forEach(r => {{
@@ -309,6 +328,7 @@ def generate_html_report(data: dict[str, Any], output_path: Path) -> None:
         "ledger": data["ledger"],
         "approach_summary": data.get("approach_summary", {}),
         "lever_baselines": lever_baselines,
+        "pending_queue": data.get("pending_queue", []),
         "insights": data.get("insights", {}),
         "gen_history": data.get("gen_history", []),
     }, ensure_ascii=False)

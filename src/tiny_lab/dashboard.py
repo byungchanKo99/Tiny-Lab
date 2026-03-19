@@ -284,6 +284,13 @@ def build_board_data(project_dir: Path) -> dict[str, Any] | None:
                 if untried:
                     insights.setdefault("untried_approaches", []).extend(untried)
 
+    # Pending + running hypotheses for queue preview
+    pending_queue = [
+        {"id": h.get("id"), "approach": h.get("approach", ""), "description": h.get("description", ""),
+         "status": h.get("status")}
+        for h in queue if h.get("status") in ("pending", "running")
+    ]
+
     return {
         "project": project,
         "metric_name": metric_name,
@@ -294,6 +301,7 @@ def build_board_data(project_dir: Path) -> dict[str, Any] | None:
         "best_row": best_row,
         "counts": counts,
         "queue_counts": queue_counts,
+        "pending_queue": pending_queue,
         "approach_summary": approach_summary,
         "insights": insights,
         "gen_history": load_generate_history(project_dir),

@@ -36,6 +36,7 @@ def _build_api_data(project_dir: Path) -> dict[str, Any]:
         "gen_history": data.get("gen_history", []),
         "best_row": data["best_row"],
         "queue_counts": data.get("queue_counts", {}),
+        "pending_queue": data.get("pending_queue", []),
         "insights": data.get("insights", {}),
         "loop_status": status.get("loop", "STOPPED"),
     }

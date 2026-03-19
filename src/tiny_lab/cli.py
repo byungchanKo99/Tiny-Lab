@@ -484,6 +484,14 @@ def _format_board(data: dict[str, Any]) -> None:
     else:
         print("No experiments yet.")
 
+    pending_queue = data.get("pending_queue", [])
+    if pending_queue:
+        print()
+        print(f"Pending Queue ({len(pending_queue)}):")
+        for h in pending_queue:
+            status_marker = ">" if h.get("status") == "running" else " "
+            print(f"  {status_marker} {h.get('id', '?'):<10} {h.get('approach', ''):<25} {h.get('description', '')[:55]}")
+
     recent_events = data.get("recent_events", [])
     if recent_events:
         print()
