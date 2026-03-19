@@ -244,8 +244,8 @@ class TestDispatchOptimize:
         assert result is None
 
     @patch("tiny_lab.optimize.run_experiment_command")
-    def test_project_level_search_space(self, mock_run):
-        """search_space in project is used when hypothesis has none."""
+    def test_project_level_search_space_by_approach(self, mock_run):
+        """search_space in project is looked up by approach name."""
         mock_run.return_value = subprocess.CompletedProcess(
             args="", returncode=0, stdout='{"loss": 0.5}\n', stderr="",
         )
@@ -253,7 +253,10 @@ class TestDispatchOptimize:
             "metric": {"name": "loss", "direction": "minimize"},
             "levers": {},
             "optimize": {"type": "random", "n_trials": 2},
-            "search_space": {"lr": {"type": "float", "low": 0.001, "high": 0.1}},
+            "search_space": {
+                "xgboost": {"lr": {"type": "float", "low": 0.001, "high": 0.1}},
+                "lightgbm": {"num_leaves": {"type": "int", "low": 20, "high": 127}},
+            },
         }
         hypothesis = {
             "id": "H-1",
@@ -263,6 +266,28 @@ class TestDispatchOptimize:
         result = dispatch_optimize(project, "echo", hypothesis, Path("/tmp"), "EXP-002")
         assert result is not None
         assert result.n_trials == 2
+        # Should only have xgboost params, not lightgbm
+        assert "lr" in result.best_params
+        assert "num_leaves" not in result.best_params
+
+    @patch("tiny_lab.optimize.run_experiment_command")
+    def test_unknown_approach_returns_none(self, mock_run):
+        """Approach not in search_space and no hypothesis search_space → None."""
+        project = {
+            "metric": {"name": "loss", "direction": "minimize"},
+            "levers": {},
+            "optimize": {"type": "random", "n_trials": 1},
+            "search_space": {
+                "xgboost": {"lr": {"type": "float", "low": 0.001, "high": 0.1}},
+            },
+        }
+        hypothesis = {
+            "id": "H-1",
+            "approach": "catboost",  # not in search_space
+            "description": "test",
+        }
+        result = dispatch_optimize(project, "echo", hypothesis, Path("/tmp"), "EXP-002")
+        assert result is None  # no params to optimize
 
     @patch("tiny_lab.optimize.run_experiment_command")
     def test_hypothesis_search_space_overrides_project(self, mock_run):
@@ -274,7 +299,9 @@ class TestDispatchOptimize:
             "metric": {"name": "loss", "direction": "minimize"},
             "levers": {},
             "optimize": {"type": "random", "n_trials": 1},
-            "search_space": {"lr": {"type": "float", "low": 0.001, "high": 0.1}},
+            "search_space": {
+                "xgboost": {"lr": {"type": "float", "low": 0.001, "high": 0.1}},
+            },
         }
         hypothesis = {
             "id": "H-1",
@@ -284,7 +311,7 @@ class TestDispatchOptimize:
         }
         result = dispatch_optimize(project, "echo", hypothesis, Path("/tmp"), "EXP-002")
         assert result is not None
-        # Both lr (from project) and depth (from hypothesis) should be in best_params
+        # Both lr (from project.xgboost) and depth (from hypothesis) should be in best_params
         assert result.best_params is not None
 
     @patch("tiny_lab.optimize.run_experiment_command")

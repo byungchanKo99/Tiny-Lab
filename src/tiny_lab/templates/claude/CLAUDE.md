@@ -31,24 +31,36 @@ Every project MUST have `search_space` and `optimize` in project.yaml. Without t
 Example:
 
 ```yaml
-search_space:
-  lr: { type: float, low: 0.001, high: 1.0, log: true }
-  max_depth: { type: int, low: 3, high: 15 }
-  n_estimators: { type: int, low: 50, high: 500 }
+search_space: # Per-approach — each approach gets only its own params
+  lightgbm:
+    num_leaves: { type: int, low: 20, high: 127 }
+    learning_rate: { type: float, low: 0.01, high: 0.3, log: true }
+    n_estimators: { type: int, low: 50, high: 500 }
+  xgboost:
+    max_depth: { type: int, low: 3, high: 15 }
+    learning_rate: { type: float, low: 0.01, high: 0.3, log: true }
+  random_forest:
+    n_estimators: { type: int, low: 50, high: 500 }
+    max_depth: { type: int, low: 3, high: 20 }
 
 optimize:
   type: random
   time_budget: 300
   n_trials: 20
 
-levers:
-  lr:
+levers: # CLI flag mapping for optimizer to inject params
+  learning_rate:
     flag: "--lr"
     baseline: 0.1
   max_depth:
     flag: "--max-depth"
     baseline: 6
+  num_leaves:
+    flag: "--num-leaves"
+    baseline: 31
 ```
+
+Each approach only gets its own parameters — optimizer won't waste trials on irrelevant params.
 
 **DO NOT start the loop without search_space and optimize configured.**
 

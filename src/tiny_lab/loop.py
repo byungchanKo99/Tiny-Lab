@@ -23,7 +23,7 @@ from .lock import LockManager
 from .logging import configure_log, log
 from .project import (
     load_project, project_name, metric_name, metric_direction,
-    build_type, run_type, evaluate_type, search_space,
+    build_type, run_type, evaluate_type, search_space_for_approach,
 )
 from .providers import get_provider
 from .events import emit_event, EventType
@@ -259,7 +259,8 @@ class ResearchLoop:
     def _handle_optimize(self, ctx: CycleContext, project: dict[str, Any]) -> State:
         """OPTIMIZE state: dispatch inner loop or fall back to single RUN."""
         assert ctx.hypothesis is not None and ctx.command is not None and ctx.exp_id is not None
-        ss = ctx.hypothesis.get("search_space") or search_space(project)
+        approach = ctx.hypothesis.get("approach", "")
+        ss = ctx.hypothesis.get("search_space") or search_space_for_approach(project, approach)
         if not ss:
             return self._handle_run_single(ctx, project)
 

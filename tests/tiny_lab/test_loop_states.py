@@ -231,7 +231,7 @@ class TestHandleOptimize:
         )
         # Add search_space to project.yaml
         project = _load_project(project_dir)
-        project["search_space"] = {"lr": {"type": "float", "low": 0.001, "high": 0.1}}
+        project["search_space"] = {"xgboost": {"lr": {"type": "float", "low": 0.001, "high": 0.1}}}
         (project_dir / "research" / "project.yaml").write_text(yaml.dump(project))
         project = _load_project(project_dir)
 

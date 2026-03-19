@@ -88,6 +88,20 @@ def search_space(p: dict[str, Any]) -> dict[str, Any]:
     return p.get("search_space", {})
 
 
+def search_space_for_approach(p: dict[str, Any], approach: str) -> dict[str, Any]:
+    """Get search_space for a specific approach.
+
+    project.yaml format:
+      search_space:
+        lightgbm:
+          num_leaves: {type: int, low: 20, high: 127}
+        xgboost:
+          max_depth: {type: int, low: 3, high: 15}
+    """
+    ss = p.get("search_space", {})
+    return ss.get(approach, {})
+
+
 def workdir(p: dict[str, Any]) -> str:
     return p.get("workdir", ".")
 

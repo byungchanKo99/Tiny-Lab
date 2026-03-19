@@ -19,7 +19,7 @@ from typing import Any
 from .errors import OptimizeError
 from .evaluate import extract_metric_from_stdout
 from .logging import log
-from .project import metric_name as _metric_name, metric_direction as _metric_direction, levers as _levers, workdir as _workdir, search_space as _search_space, optimize_config as _optimize_config
+from .project import metric_name as _metric_name, metric_direction as _metric_direction, levers as _levers, workdir as _workdir, search_space_for_approach as _search_space_for_approach, optimize_config as _optimize_config
 from .run import run_experiment_command
 
 
@@ -414,8 +414,9 @@ def dispatch_optimize(
 
     Returns None if no search_space is defined.
     """
-    # Hypothesis-level search_space overrides/extends project-level
-    project_space = _search_space(project)
+    # Look up search_space by approach name, then merge with hypothesis overrides
+    approach = hypothesis.get("approach", "")
+    project_space = _search_space_for_approach(project, approach)
     hypothesis_space = hypothesis.get("search_space", {})
     search_space_raw = {**project_space, **hypothesis_space}
     if not search_space_raw:
