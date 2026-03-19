@@ -267,7 +267,7 @@ The loop will fail at runtime if dependencies are missing. **Install them before
 
 ### Adding Hypotheses Manually
 
-Each hypothesis picks an **approach** — a short strategy name. The optimizer handles parameter tuning.
+Each hypothesis picks an **approach** (strategy). The optimizer handles parameter tuning using `search_space` defined in project.yaml.
 
 ```yaml
 - id: H-001
@@ -278,30 +278,14 @@ Each hypothesis picks an **approach** — a short strategy name. The optimizer h
 ```
 
 Required fields: `id`, `status`, `approach`, `description`.
-Optional: `reasoning`, `code_changes`, `references`.
+Optional: `search_space` (only for approach-specific params not in project.yaml), `reasoning`, `code_changes`, `references`, `optimize_type`.
 
-**`approach` is a strategy NAME, not a command or parameter list:**
+**Key principle:** YOU decide the **strategy** (approach), the **optimizer** decides the **parameters**.
 
-```yaml
-# CORRECT — strategy names
-approach: random_forest
-approach: xgboost
-approach: stacking_ensemble
-approach: feature_engineering_pca
-
-# WRONG — these are commands, not approach names
-approach: "python train.py --model rf --depth 10"
-
-# WRONG — these are parameter descriptions, not strategies
-approach: "lgbm_high_num_leaves"
-approach: "xgboost_low_lr_deep_trees"
-
-# WRONG — do not use lever+value format
-lever: "model"
-value: {"model": "rf", "depth": 10}
-```
-
-The approach name must match a key in `project.yaml` `search_space:` so the optimizer knows which parameters to tune. If no matching search_space exists, the experiment runs once with baseline parameters.
+- DO: `approach: xgboost_stacking` (optimizer uses project-level search_space)
+- DON'T: Specify exact parameter values — that's the optimizer's job
+- DON'T: Define search_space per hypothesis unless adding approach-specific params
+- NEVER: Same approach + different ranges = NOT a new hypothesis
 
 Valid statuses: `pending`, `running`, `done`, `skipped`.
 

@@ -28,20 +28,6 @@ def load_project(project_dir: Path) -> dict[str, Any]:
     return data
 
 
-def warn_missing_optimizer_config(data: dict[str, Any]) -> None:
-    """Log warnings if search_space or optimize sections are missing.
-
-    Called by the loop at startup, not on every load_project call.
-    """
-    from .logging import log
-    if not data.get("search_space"):
-        log("WARNING: project.yaml has no 'search_space'. "
-            "Optimizer cannot tune hyperparameters — experiments will run with fixed parameters only.")
-    if not data.get("optimize"):
-        log("WARNING: project.yaml has no 'optimize' section. "
-            "Using defaults (type=random, time_budget=300s, n_trials=20).")
-
-
 # ---------------------------------------------------------------------------
 # Accessor functions — SSOT for project dict key paths
 # ---------------------------------------------------------------------------
