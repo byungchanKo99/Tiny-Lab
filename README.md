@@ -37,19 +37,20 @@ Requires **Python 3.10+** and one of:
 cd your-project
 tiny-lab init              # Scaffold project (auto-detects Claude Code or Codex CLI)
 
-# AI-guided setup — analyzes your data, proposes metrics & levers:
-tiny-lab discover "optimize hotel pricing"
+# AI-guided setup — analyzes your data, proposes config:
+tiny-lab discover "optimize hotel cancellation prediction"
 # Or with Claude Code:
-/research 호텔 가격 최적화하고 싶어
+/research 호텔 취소 예측 최적화하고 싶어
 
 # Start the loop (always in background)
 CYCLE_SLEEP=1 tiny-lab run > research/tiny_lab_run.out 2>&1 &
 
 # Monitor
 tiny-lab status            # RUNNING / STOPPED
-tiny-lab board             # Results dashboard
+tiny-lab board             # Results dashboard + pending queue
 tiny-lab board --plot      # With ASCII sparklines
 tiny-lab board --html      # Chart.js HTML report
+tiny-lab board --live      # Real-time dashboard on localhost
 ```
 
 ## Two Research Modes
@@ -64,25 +65,33 @@ Both modes **must** run in background (`&`). Infinite mode never exits on its ow
 ## How It Works
 
 1. **Pick** a hypothesis (approach) from the queue
-2. **Build** the experiment command (flag substitution, code modification, or script)
-3. **Optimize** — if `search_space` is defined, run inner loop (grid/random/custom) to find best params; otherwise single run
-4. **Evaluate** the result (parse stdout JSON, run eval script, or AI scoring)
-5. **Record** WIN / LOSS / INVALID to the append-only ledger
-6. **Repeat** — in infinite mode, GENERATE pipeline creates new hypotheses when the queue empties
+2. **Build** the experiment command — inject model via `model` lever + optimizer params via `search_space`
+3. **Optimize** — run inner loop (grid/random/custom) to find best hyperparameters for this approach
+4. **Evaluate** the result — WIN (>1% improvement), MARGINAL (<1%), LOSS, or INVALID
+5. **Record** to the append-only ledger with full diff and best_params
+6. **Repeat** — in infinite mode, GENERATE pipeline creates new approach hypotheses when the queue empties
 
-The loop halts on **circuit breaker** (5 INVALID in last 20 experiments) or `tiny-lab stop`.
+The loop halts on **circuit breaker** (5 INVALID in last 20) or **stagnation** (warns every 20 experiments without new best) or `tiny-lab stop`.
 
 ## CLI
 
-| Command             | Description                               | Key Flags                                                                      |
-| ------------------- | ----------------------------------------- | ------------------------------------------------------------------------------ |
-| `tiny-lab init`     | Scaffold experiment project               | `--global` (install /research to ~/.claude/), `--update` (overwrite templates) |
-| `tiny-lab discover` | AI-guided interactive setup               | Natural language intent argument                                               |
-| `tiny-lab run`      | Start the research loop                   | `--until-idle` (finite mode), `--on-event CMD` (webhook)                       |
-| `tiny-lab status`   | Show loop state & queue counts            | `--json` (structured output)                                                   |
-| `tiny-lab stop`     | Graceful shutdown (SIGTERM)               |                                                                                |
-| `tiny-lab board`    | Experiment results dashboard              | `--export csv/json`, `--plot`, `--html [FILE]`                                 |
-| `tiny-lab generate` | Manually trigger AI hypothesis generation |                                                                                |
+| Command             | Description                            | Key Flags                                                                      |
+| ------------------- | -------------------------------------- | ------------------------------------------------------------------------------ |
+| `tiny-lab init`     | Scaffold experiment project            | `--global` (install /research to ~/.claude/), `--update` (overwrite templates) |
+| `tiny-lab discover` | AI-guided interactive setup            | Natural language intent argument                                               |
+| `tiny-lab run`      | Start the research loop                | `--until-idle` (finite mode), `--on-event CMD` (webhook)                       |
+| `tiny-lab status`   | Show loop state & queue counts         | `--json` (structured output)                                                   |
+| `tiny-lab stop`     | Graceful shutdown (SIGTERM)            |                                                                                |
+| `tiny-lab board`    | Experiment dashboard + insights        | `--export csv/json`, `--plot`, `--html [FILE]`, `--live`                       |
+| `tiny-lab generate` | Manually trigger hypothesis generation |                                                                                |
+
+### Dashboard Features
+
+- **Best result** with full hyperparameter diff (baseline → best)
+- **Approach comparison** chart (best metric per approach)
+- **Pending queue** — what's coming next
+- **Insights** — experiments/hour, convergence status, stagnation warnings, ETA
+- **Live mode** (`--live`) — real-time updates via JS polling, no page reload
 
 ### Environment Variables
 
@@ -95,39 +104,54 @@ The loop halts on **circuit breaker** (5 INVALID in last 20 experiments) or `tin
 ## project.yaml
 
 ```yaml
-name: hotel-pricing
-description: "Optimize hotel RevPAR by adjusting pricing parameters"
+name: hotel-cancellation
+description: "Hotel cancellation prediction with rolling window CV"
 
 build:
-  type: flag # flag | script | code
+  type: flag
 
 run:
-  type: command # command | pipeline
+  type: command
 
 evaluate:
-  type: stdout_json # stdout_json | script | llm
+  type: stdout_json
 
 baseline:
-  command: "python3 pricing_model.py --rate-adj 1.0 --season-weight 0.5"
+  command: "python train.py --model logistic"
 
 metric:
-  name: revpar
-  direction: maximize # minimize | maximize
+  name: roc_auc
+  direction: maximize
 
+# CLI flag mappings — needed for optimizer to inject params
 levers:
-  rate_adjustment:
-    flag: "--rate-adj"
-    baseline: 1.0
-    space: [0.8, 0.9, 1.0, 1.1, 1.2]
+  model:
+    flag: "--model"
+    baseline: "logistic"
+  learning_rate:
+    flag: "--lr"
+    baseline: 0.1
+  max_depth:
+    flag: "--max-depth"
+    baseline: 6
 
-# Parameter type definitions — optimizer searches within these
+# Per-approach parameter definitions — each approach gets only its own params
 search_space:
-  rate_adj: { type: float, low: 0.5, high: 2.0 }
-  season_weight: { type: float, low: 0.1, high: 1.0 }
+  lightgbm:
+    num_leaves: { type: int, low: 20, high: 127 }
+    learning_rate: { type: float, low: 0.01, high: 0.3, log: true }
+    n_estimators: { type: int, low: 50, high: 500 }
+  xgboost:
+    max_depth: { type: int, low: 3, high: 15 }
+    learning_rate: { type: float, low: 0.01, high: 0.3, log: true }
+  random_forest:
+    n_estimators: { type: int, low: 50, high: 500 }
+    max_depth: { type: int, low: 3, high: 20 }
 
-# Optimizer config (built-in: grid, random; external: custom)
+# Built-in: grid, random. External tools: custom + optimize_script
 optimize:
   type: random
+  time_budget: 300
   n_trials: 20
 
 rules:
@@ -137,36 +161,41 @@ rules:
 Your experiment script must print the metric as JSON to stdout:
 
 ```json
-{ "revpar": 142.5 }
+{ "roc_auc": 0.862 }
 ```
 
-## What You Write
+## Hypothesis Format
 
-| What                                     | Who writes it                         | Notes                                                          |
-| ---------------------------------------- | ------------------------------------- | -------------------------------------------------------------- |
-| **Experiment script** (e.g., `train.py`) | You                                   | The actual model training / evaluation code                    |
-| `research/project.yaml`                  | AI proposes, you confirm              | `tiny-lab discover` or `/research` generates it interactively  |
-| `research/hypothesis_queue.yaml`         | AI proposes, you confirm              | Initial hypotheses; also auto-generated by `tiny-lab generate` |
-| Custom optimizer script                  | You (only if `optimize.type: custom`) | Optional — built-in `grid` / `random` cover most cases         |
+Each hypothesis picks an **approach** — a short strategy name matching a key in `search_space`:
 
-In practice, **you only need to write the experiment script**. Everything else is generated through conversation:
-
-```bash
-tiny-lab discover "optimize hotel pricing"   # AI analyzes your code, proposes project.yaml + hypotheses
-tiny-lab run                                  # Loop runs autonomously
+```yaml
+hypotheses:
+  - id: H-001
+    status: pending
+    approach: lightgbm
+    description: "LightGBM gradient boosting"
+    reasoning: "Leaf-wise growth often outperforms on tabular data"
+  - id: H-002
+    status: pending
+    approach: xgboost
+    description: "XGBoost with regularization"
+    reasoning: "L1/L2 regularization for robust generalization"
 ```
 
-When an **AI agent** (Claude Code, Codex CLI) drives the full workflow, the user writes nothing — the agent discovers the project, configures the YAML, generates hypotheses, and runs the loop end-to-end.
+The `model` lever auto-injects the approach name into the baseline command (`--model logistic` → `--model lightgbm`). The optimizer then tunes only the parameters defined for that approach in `search_space`.
 
 ## Plugin Types
 
 | Phase    | Type          | Description                                                   | Needs AI? |
 | -------- | ------------- | ------------------------------------------------------------- | --------- |
-| BUILD    | `flag`        | Replace CLI flags in baseline command (single or multi-lever) | No        |
+| BUILD    | `flag`        | Replace CLI flags in baseline command + inject model approach | No        |
 | BUILD    | `script`      | Use predefined script per lever:value                         | No        |
 | BUILD    | `code`        | AI modifies source code via sub-agent                         | Yes       |
 | RUN      | `command`     | Direct shell execution                                        | No        |
 | RUN      | `pipeline`    | Multi-step workflow with background processes                 | No        |
+| OPTIMIZE | `grid`        | Exhaustive parameter grid search (built-in)                   | No        |
+| OPTIMIZE | `random`      | Random sampling (built-in, default)                           | No        |
+| OPTIMIZE | `custom`      | External optimizer script (optuna, NAS, etc.)                 | No        |
 | EVALUATE | `stdout_json` | Parse metric from last JSON object in stdout                  | No        |
 | EVALUATE | `script`      | Run separate eval script (supports retries)                   | No        |
 | EVALUATE | `llm`         | AI scores artifacts (screenshots, HTML, etc.)                 | Yes       |
@@ -200,19 +229,15 @@ your-project/
 
 ## Architecture
 
-25 modules organized in layers:
-
-| Layer         | Modules                                                                    |
-| ------------- | -------------------------------------------------------------------------- |
-| **Entry**     | `cli`                                                                      |
-| **Core**      | `loop` (state machine)                                                     |
-| **Logic**     | `generate`, `pipeline`, `build`, `run`, `optimize`, `evaluate`, `baseline` |
-| **Data**      | `project`, `queue`, `ledger`, `schemas`, `migrate`                         |
-| **Query**     | `dashboard`, `report`                                                      |
-| **Infra**     | `paths`, `errors`, `logging`, `lock`, `events`, `envutil`                  |
-| **Providers** | `claude`, `codex` (via abstract `AIProvider`)                              |
-
-Schema versioning with auto-migration (v1 → v2). See `docs/architecture.md` for detailed diagrams.
+```
+Entry       cli
+Core        loop (state machine)
+Logic       generate, pipeline, build, run, optimize, evaluate, baseline
+Data        project (accessors), queue, ledger, schemas, migrate
+Query       dashboard, report, server
+Infra       paths, errors, logging, lock, events, envutil
+Providers   claude, codex (via abstract AIProvider)
+```
 
 ## Development
 
@@ -221,7 +246,7 @@ pip install -e ".[dev]"
 pytest tests/tiny_lab/
 ```
 
-246 tests covering state machine transitions, plugin dispatch, optimizer inner loop, pipeline engine, schema migration, event system, error recovery, and circuit breaker.
+247 tests covering state machine, optimizer inner loop, pipeline engine, approach dedup, stagnation detection, MARGINAL verdict, YAML recovery, and more.
 
 ## Credits
 
