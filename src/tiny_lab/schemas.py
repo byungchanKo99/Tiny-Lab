@@ -25,10 +25,10 @@ HYPOTHESIS_ENTRY = {
     "required": {"id": str, "status": str, "description": str},
     "optional": {
         "reasoning": str,
-        # v1 fields (lever-based)
+        # Deprecated lever-based fields (still accepted for backward compat)
         "lever": str,
         "value": (str, int, float, dict),
-        # v2 fields (approach-based)
+        # Approach-based fields (preferred)
         "approach": str,
         "search_space": dict,
         "code_changes": str,
@@ -164,10 +164,8 @@ def validate(data: Any, schema_name: str, *, strict: bool = True) -> list[str]:
 def validate_hypothesis_entry(entry: dict[str, Any], *, strict: bool = True) -> list[str]:
     """Validate a single hypothesis entry.
 
-    Supports two formats:
-    - v1 (deprecated): lever + value (traditional flag-based)
-    - v2 (preferred): approach (strategy-based, optimizer handles params)
-    At least one format must be present.
+    Preferred: approach (strategy name, optimizer handles params).
+    Deprecated: lever + value (still accepted for backward compat).
     """
     errors = validate(entry, "hypothesis_entry", strict=False)
 

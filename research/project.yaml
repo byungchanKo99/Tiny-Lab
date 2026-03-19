@@ -24,5 +24,4 @@ levers:
     space: [0.5, 1.0, 1.5, 2.0]
 
 rules:
-  - "Change command-line flags only"
-  - "Do not install packages"
+  - "Install required dependencies before starting the loop"

@@ -131,8 +131,7 @@ optimize:
   n_trials: 20
 
 rules:
-  - "Change command-line flags only"
-  - "Do not install packages"
+  - "Install required dependencies before starting the loop"
 ```
 
 Your experiment script must print the metric as JSON to stdout:

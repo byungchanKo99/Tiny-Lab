@@ -29,7 +29,7 @@ def _build_experiment_diff(row: dict[str, Any], lever_baselines: dict[str, Any])
 
     parts = []
 
-    # v2 approach-based
+    # Approach-based
     if row.get("approach"):
         parts.append(f"approach: {row['approach']}")
         opt = row.get("optimize_result", {})
@@ -43,7 +43,7 @@ def _build_experiment_diff(row: dict[str, Any], lever_baselines: dict[str, Any])
                     parts.append(f"{k}: {v}")
         return ", ".join(parts)
 
-    # v1 lever-based
+    # Legacy lever-based
     changed = row.get("changed_variable", "")
     value = row.get("value")
     config = row.get("config", {})

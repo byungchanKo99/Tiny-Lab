@@ -31,17 +31,21 @@ tiny-lab discover "what you want to optimize"
 
 Discovery will scan data/scripts, analyze them, and set up everything.
 
+**MANDATORY in project.yaml:**
+
+- `search_space` — per-approach parameter definitions (e.g., `lightgbm: {num_leaves: ...}`)
+- `optimize` — optimizer config (`type: random`, `time_budget: 300`, `n_trials: 20`)
+- `levers` — CLI flag mappings including a `model` lever if approaches use different models
+
 ### 3. Run the loop
 
 **Choose the right mode based on the user's intent:**
 
 ```bash
 # Infinite mode (default) — open-ended optimization, never exits on its own
-# Use for: "optimize accuracy", "find best params", "improve performance"
 CYCLE_SLEEP=1 tiny-lab run > research/tiny_lab_run.out 2>&1 &
 
 # Finite mode (--until-idle) — stops when queue is empty, no GENERATE phase
-# Use for: "compare these 5 models", "test these configs", bounded comparisons
 CYCLE_SLEEP=1 tiny-lab run --until-idle > research/tiny_lab_run.out 2>&1 &
 ```
 
@@ -49,19 +53,19 @@ You MUST run it as a **background process**. Do NOT run it in the foreground.
 
 The loop will:
 
-- Pick a hypothesis from the queue
-- Modify the experiment (swap a flag, change code, etc.)
-- Run the experiment
-- Evaluate the result (WIN/LOSS/INVALID)
+- Pick a hypothesis (approach) from the queue
+- Build the experiment command (inject model + parameters via levers)
+- Optimize — run inner loop (grid/random/custom) to find best params for this approach
+- Evaluate the result (WIN/LOSS/MARGINAL/INVALID)
 - Record to `research/ledger.jsonl`
-- **Infinite mode:** When the queue is empty, generate new hypotheses autonomously and repeat indefinitely
+- **Infinite mode:** When the queue is empty, generate new hypotheses autonomously and repeat
 - **Until-idle mode:** When the queue is empty, stop automatically
 
 ### 4. Monitor — YOUR PRIMARY JOB AFTER STARTING THE LOOP
 
 **The loop never stops on its own. Your initial hypotheses are just the STARTING POINT.**
 
-After the initial queue is exhausted, the loop enters GENERATE and creates NEW hypotheses autonomously — trying new lever values, adding new levers, extending search spaces. This means better results may appear AFTER your initial hypotheses are done.
+After the initial queue is exhausted, the loop enters GENERATE and creates NEW approach-based hypotheses autonomously. This means better results may appear AFTER your initial hypotheses are done.
 
 **DO NOT stop monitoring when your initial hypotheses finish.**
 **DO NOT report final results based only on your initial hypotheses.**
@@ -71,21 +75,11 @@ tiny-lab status   # Is it alive? What phase?
 tiny-lab board    # Results dashboard — check this REPEATEDLY
 ```
 
-**Monitoring loop (keep doing this while the loop runs):**
-
-1. Check `tiny-lab board` periodically
-2. If the loop generated new hypotheses and ran them → new results exist → update your understanding
-3. If the best result changed → note it
-4. Only report to the user when:
-   - The user asks for status
-   - The loop stops (circuit breaker, crash, or `tiny-lab stop`)
-   - You have enough data to make a meaningful recommendation
-
 **Intervene when:**
 
-- Loop stalls in GENERATE → search space exhausted, add new levers
-- Many INVALID → experiment command is broken, diagnose and fix
-- Many LOSS → current approach isn't working, try different direction
+- Stagnation warning — many experiments without best improvement, try different approaches
+- Many INVALID — experiment command is broken, diagnose and fix
+- Many LOSS/MARGINAL — current approaches aren't working, try fundamentally different direction
 
 ### 5. Report
 
@@ -93,11 +87,11 @@ tiny-lab board    # Results dashboard — check this REPEATEDLY
 
 When reporting (user asks, or loop stops):
 
-- **Total** experiments run (including auto-generated ones), WIN/LOSS ratio
-- **Best configuration found** — this may be from an auto-generated hypothesis, not your initial ones
-- What was explored — initial hypotheses AND what the loop discovered on its own
+- **Total** experiments run (including auto-generated), WIN/LOSS ratio
+- **Best configuration** — approach + best hyperparameters found by optimizer
+- What was explored — initial approaches AND what the loop discovered
 - Whether the loop is still running or stopped
-- Recommended next steps (continue loop? change direction? stop?)
+- Recommended next steps (continue? change direction? stop?)
 
 ## Key files
 
@@ -110,8 +104,9 @@ When reporting (user asks, or loop stops):
 
 ## Important
 
-- **`tiny-lab run` is an INFINITE LOOP** — it never exits on its own. Always run it in the background and monitor with `tiny-lab status` / `tiny-lab board`. Stop it with `tiny-lab stop`.
-- The loop generates new hypotheses when the queue is empty — including adding new levers and extending search spaces
+- **`tiny-lab run` is an INFINITE LOOP** — always run in background, stop with `tiny-lab stop`
+- Each hypothesis = an approach (strategy name), NOT parameter values
+- The optimizer handles parameter tuning, you handle strategy selection
 - Don't modify `ledger.jsonl` — it's the source of truth
-- Use `tiny-lab stop` to stop, don't kill the process
 - The circuit breaker stops after 5 INVALID in last 20 experiments
+- Install all required dependencies before starting the loop

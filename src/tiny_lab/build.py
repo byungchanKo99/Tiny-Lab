@@ -120,7 +120,7 @@ def dispatch_build(
     project_levers = levers(project)
 
     if btype == "flag":
-        # v2 hypothesis with approach: return baseline command as-is
+        # Approach-based hypothesis: inject model, return command for optimizer
         # (parameters will be injected by the optimizer)
         if "approach" in hypothesis and "lever" not in hypothesis:
             cmd = baseline_command(project)

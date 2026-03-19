@@ -327,7 +327,7 @@ class ResearchLoop:
         mname = metric_name(project)
         baseline_metric = get_baseline_metric(self.project_dir, mname)
 
-        # v2 hypothesis (approach-based) vs v1 (lever-based)
+        # Approach-based hypothesis vs legacy lever-based
         if "approach" in ctx.hypothesis and "lever" not in ctx.hypothesis:
             changed_var = ctx.hypothesis["approach"]
             value = ctx.optimize_result.best_params if ctx.optimize_result else {}
@@ -360,7 +360,7 @@ class ResearchLoop:
             "reasoning": ctx.hypothesis.get("reasoning", ""),
         }
 
-        # Include optimize_result in ledger for v2 hypotheses
+        # Include optimize_result in ledger for approach-based hypotheses
         if ctx.optimize_result is not None:
             entry["optimize_result"] = {
                 "n_trials": ctx.optimize_result.n_trials,
