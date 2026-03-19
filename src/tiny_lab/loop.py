@@ -24,6 +24,7 @@ from .logging import configure_log, log
 from .project import (
     load_project, project_name, metric_name, metric_direction,
     build_type, run_type, evaluate_type, search_space_for_approach,
+    warn_missing_optimizer_config,
 )
 from .providers import get_provider
 from .events import emit_event, EventType
@@ -447,6 +448,7 @@ class ResearchLoop:
         self._recover_state()
 
         project = load_project(self.project_dir)
+        warn_missing_optimizer_config(project)
         btype = build_type(project)
         rtype = run_type(project)
         etype = evaluate_type(project)

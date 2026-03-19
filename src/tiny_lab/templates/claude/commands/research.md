@@ -335,23 +335,29 @@ Which metric do you want to optimize? Are these the right levers?
 
 4. **Write `research/hypothesis_queue.yaml`** — generate 3-5 hypotheses.
 
-   Each hypothesis picks an **approach** (strategy). The optimizer handles parameter tuning from `project.yaml` `search_space:`.
+   Each hypothesis picks an **approach** — a short name matching a key in `search_space:`.
 
    ```yaml
    hypotheses:
      - id: H-001
        status: pending
        approach: logistic_regression
-       description: "Logistic Regression baseline for interpretability"
-       reasoning: "Start with a simple linear model before trying complex approaches"
+       description: "Logistic Regression baseline"
+       reasoning: "Simple linear model as baseline"
      - id: H-002
        status: pending
        approach: random_forest
-       description: "Random Forest with tree depth search"
-       reasoning: "Nonlinear model to capture feature interactions"
+       description: "Random Forest ensemble"
+       reasoning: "Tree ensemble for nonlinear relationships"
    ```
 
-   Key principle: YOU pick the **strategy** (approach), the **optimizer** picks the **parameters**. Do NOT specify exact parameter values.
+   **CRITICAL — approach must be a short strategy name:**
+
+   - CORRECT: `approach: random_forest`, `approach: stacking_ensemble`
+   - WRONG: `approach: "python train.py --model rf --depth 10"` (command, not name)
+   - WRONG: `approach: "lgbm_high_num_leaves"` (parameter description, not strategy)
+
+   The approach name must match a key in `project.yaml` `search_space:` so the optimizer knows which parameters to tune.
 
 5. **Verify baseline** — run the baseline command and check output:
    - Parse stdout for JSON containing `metric.name`

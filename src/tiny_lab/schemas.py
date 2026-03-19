@@ -183,6 +183,23 @@ def validate_hypothesis_entry(entry: dict[str, Any], *, strict: bool = True) -> 
                 hint = " (don't include 'command' — it's built from lever+value)"
             errors.append(f"Hypothesis must have either ('lever' + 'value') or 'approach'{hint}")
 
+        # Validate approach field format
+        if has_v2:
+            approach = entry.get("approach", "")
+            if isinstance(approach, str):
+                # Reject commands disguised as approach names
+                if approach.startswith("python ") or approach.startswith("./") or " --" in approach:
+                    errors.append(
+                        f"'approach' must be a strategy name, not a command. "
+                        f"Got: '{approach[:60]}'. Use a short name like 'random_forest' or 'stacking_ensemble'."
+                    )
+                # Warn on overly specific parameter-describing names
+                if len(approach) > 40:
+                    errors.append(
+                        f"'approach' name too long ({len(approach)} chars). "
+                        f"Use a short strategy name, not a parameter description."
+                    )
+
     if errors and strict:
         raise ValidationError(errors, "hypothesis_entry")
 

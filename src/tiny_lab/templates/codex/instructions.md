@@ -100,24 +100,35 @@ The loop is designed to run indefinitely. **You must NEVER:**
 
 ## Hypothesis Format
 
-Each hypothesis picks an **approach** (strategy). The optimizer handles parameter tuning using `search_space` from `project.yaml`.
+Each hypothesis picks an **approach** — a short strategy name. The optimizer handles parameters.
 
 ```yaml
 - id: H-001
   status: pending
-  approach: xgboost_stacking
-  description: "XGBoost + LightGBM stacking ensemble"
-  reasoning: "Combine gradient boosting variants for better generalization"
+  approach: xgboost
+  description: "XGBoost gradient boosting"
+  reasoning: "Strong regularization for tabular data"
 ```
 
 Required: `id`, `status`, `approach`, `description`.
-Optional: `search_space` (approach-specific params not in project.yaml), `reasoning`, `code_changes`, `references`.
+Optional: `reasoning`, `code_changes`, `references`.
 
-**Key principle:** YOU decide the **strategy** (approach). The **optimizer** decides the **parameters**.
+**`approach` must be a strategy NAME that matches a key in project.yaml `search_space:`.**
 
-- DO: Pick a new model family, ensemble method, or feature engineering approach
-- DON'T: Specify exact parameter values — the optimizer handles this
-- NEVER: Same approach + different ranges = NOT a new hypothesis
+```yaml
+# CORRECT
+approach: random_forest
+approach: stacking_ensemble
+
+# WRONG — command, not a name
+approach: "python train.py --model rf --depth 10"
+
+# WRONG — parameter description, not a strategy
+approach: "lgbm_high_num_leaves"
+approach: "xgboost_low_lr_deep_trees"
+```
+
+The optimizer looks up `search_space.<approach>` for parameters to tune.
 
 ## GENERATE Phase: Output Schema
 
