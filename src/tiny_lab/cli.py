@@ -512,7 +512,7 @@ def _format_board(data: dict[str, Any]) -> None:
             state = entry.get("state", "?")
             added = entry.get("hypotheses_added_count", 0)
             reasoning = entry.get("reasoning", "")[:60]
-            hyp_ids = ", ".join(entry.get("hypotheses_added", []))
+            hyp_ids = ", ".join(str(h) for h in entry.get("hypotheses_added", []))
             print(f"  [{ts}] {state} — +{added} hypotheses")
             if reasoning:
                 print(f"    Why: {reasoning}")
@@ -520,7 +520,8 @@ def _format_board(data: dict[str, Any]) -> None:
                 print(f"    Added: {hyp_ids}")
             changes = entry.get("changes_made", [])
             if changes:
-                print(f"    Changes: {'; '.join(changes)}")
+                changes_strs = [str(c) if not isinstance(c, str) else c for c in changes]
+                print(f"    Changes: {'; '.join(changes_strs)}")
 
 
 def _export_board(data: dict[str, Any], fmt: str, output_path: str | None) -> None:
