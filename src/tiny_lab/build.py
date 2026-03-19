@@ -123,7 +123,26 @@ def dispatch_build(
         # v2 hypothesis with approach: return baseline command as-is
         # (parameters will be injected by the optimizer)
         if "approach" in hypothesis and "lever" not in hypothesis:
-            return baseline_command(project)
+            cmd = baseline_command(project)
+            approach = hypothesis["approach"]
+
+            # Inject approach into command via model lever if available
+            if "model" in project_levers:
+                import re
+                model_lever = project_levers["model"]
+                flag = model_lever["flag"]
+                bl = str(model_lever.get("baseline", ""))
+                pattern = re.compile(re.escape(flag) + r"\s+" + re.escape(bl))
+                replacement = f"{flag} {approach}"
+                if pattern.search(cmd):
+                    cmd = pattern.sub(replacement, cmd)
+                else:
+                    cmd = f"{cmd} {flag} {approach}"
+            else:
+                log(f"BUILD: WARNING — approach '{approach}' but no 'model' lever "
+                    f"to inject model selection. All approaches may run the same model.")
+
+            return cmd
 
         # Validate required fields with helpful error messages
         if "lever" not in hypothesis:

@@ -24,9 +24,21 @@ Every project MUST have `search_space` and `optimize` in project.yaml. Without t
 
 **When writing project.yaml:**
 
-- `search_space` defines parameter types and ranges — REQUIRED, not optional
+- `search_space` defines parameter types and ranges per approach — REQUIRED
 - `optimize` configures the optimizer (type, time_budget, n_trials) — REQUIRED
-- `levers` maps parameter names to CLI flags — needed for the optimizer to inject params
+- `levers` maps parameter names to CLI flags — REQUIRED for optimizer to inject params
+- **Model selection lever**: If different approaches use different models, you MUST have a lever that maps to the model CLI flag (e.g., `--model`). Without this, every approach runs the same baseline model.
+
+Example: if train.py accepts `--model lgbm`, `--model xgb`, etc., add:
+
+```yaml
+levers:
+  model:
+    flag: "--model"
+    baseline: "logistic"
+```
+
+And the baseline command should use this flag: `python train.py --model logistic`
 
 Example:
 

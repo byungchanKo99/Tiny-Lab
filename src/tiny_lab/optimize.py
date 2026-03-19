@@ -422,6 +422,22 @@ def dispatch_optimize(
     if not search_space_raw:
         return None
 
+    # Inject approach into base_command via model lever if available
+    # This ensures each approach actually runs its model, not the baseline model
+    lever_defs = _levers(project)
+    if approach and "model" in lever_defs:
+        import re
+        model_lever = lever_defs["model"]
+        flag = model_lever["flag"]
+        bl = str(model_lever.get("baseline", ""))
+        pattern = re.compile(re.escape(flag) + r"\s+" + re.escape(bl))
+        replacement = f"{flag} {approach}"
+        if pattern.search(base_command):
+            base_command = pattern.sub(replacement, base_command)
+        else:
+            base_command = f"{base_command} {flag} {approach}"
+        log(f"OPTIMIZE: injected model={approach} via {flag} into command")
+
     search_space = parse_search_space(search_space_raw)
     opt_cfg = _optimize_config(project)
 
