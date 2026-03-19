@@ -377,10 +377,10 @@ class ResearchLoop:
             "metric_value": ctx.new_metric,
         })
 
-        # Detect new best result
+        # Detect new best result + stagnation
+        ledger = load_ledger(self.project_dir)
         if ctx.verdict == "WIN" and ctx.new_metric is not None:
             direction = metric_direction(project)
-            ledger = load_ledger(self.project_dir)
             best = find_best_result(ledger, mname, direction)
             if best and best.get("id") == ctx.exp_id:
                 self._emit(EventType.NEW_BEST, {
@@ -388,6 +388,23 @@ class ResearchLoop:
                     "metric_value": ctx.new_metric,
                     "config": f"{changed_var}={value}",
                 })
+
+        # Stagnation: warn if N experiments since last best
+        non_baseline = [r for r in ledger if r.get("class") != "BASELINE"]
+        if non_baseline:
+            direction = metric_direction(project)
+            best = find_best_result(ledger, mname, direction)
+            if best:
+                best_idx = next((i for i, r in enumerate(non_baseline) if r.get("id") == best.get("id")), None)
+                if best_idx is not None:
+                    since_best = len(non_baseline) - 1 - best_idx
+                    if since_best > 0 and since_best % 20 == 0:
+                        self._emit(EventType.STAGNATION_WARNING, {
+                            "experiments_since_best": since_best,
+                            "best_id": best.get("id"),
+                            "best_value": best.get("primary_metric", {}).get(mname),
+                        })
+                        log(f"STAGNATION: {since_best} experiments since last best ({best.get('id')})")
 
         try:
             self._write_experiment_report(entry)

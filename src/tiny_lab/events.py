@@ -23,6 +23,7 @@ class EventType(str, Enum):
     IDLE_STOP = "idle_stop"
     OPTIMIZE_STARTED = "optimize_started"
     OPTIMIZE_FINISHED = "optimize_finished"
+    STAGNATION_WARNING = "stagnation_warning"
 
 
 _event_seq = 0

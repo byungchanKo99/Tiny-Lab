@@ -38,12 +38,66 @@ def _sanitize_queue_yaml(project_dir: Path) -> None:
             log("GENERATE: restored queue from backup")
 
 
+def _extract_model_family(approach: str) -> str | None:
+    """Extract the base model family from an approach name.
+
+    'lgbm_high_capacity' → 'lgbm'
+    'xgboost_deep_tuned' → 'xgboost'
+    'stacking_ensemble' → None (genuinely new)
+    """
+    known_families = [
+        "lgbm", "lightgbm", "xgboost", "xgb", "rf", "random_forest",
+        "gbm", "gradient_boosting", "catboost", "logistic", "lr",
+        "svm", "knn", "neural", "mlp", "ada", "adaboost",
+    ]
+    approach_lower = approach.lower()
+    for family in known_families:
+        if approach_lower.startswith(family) or f"_{family}" in approach_lower:
+            return family
+    return None
+
+
+def _check_approach_duplicates(
+    new_entries: list[dict[str, Any]],
+    project_dir: Path,
+) -> list[str]:
+    """Detect hypotheses that are just parameter variants of already-tried approaches.
+
+    Returns list of IDs to reject with reasons logged.
+    """
+    from .ledger import load_ledger
+    ledger = load_ledger(project_dir)
+
+    # Collect model families already tried
+    tried_families: dict[str, int] = {}  # family → count
+    for row in ledger:
+        if row.get("class") == "BASELINE":
+            continue
+        approach = row.get("approach") or row.get("changed_variable", "")
+        family = _extract_model_family(approach)
+        if family:
+            tried_families[family] = tried_families.get(family, 0) + 1
+
+    reject_ids = []
+    for entry in new_entries:
+        approach = entry.get("approach", "")
+        family = _extract_model_family(approach)
+        if family and tried_families.get(family, 0) >= 3:
+            log(f"GENERATE: rejecting {entry.get('id', '?')} — "
+                f"'{approach}' is a variant of '{family}' "
+                f"(already {tried_families[family]} experiments). "
+                f"Try a fundamentally different approach.")
+            reject_ids.append(entry.get("id"))
+
+    return reject_ids
+
+
 def _validate_new_entries(
     before: list[dict[str, Any]],
     after: list[dict[str, Any]],
     project_dir: Path,
 ) -> int:
-    """Validate newly added hypothesis entries. Remove invalid ones. Return count of valid new entries."""
+    """Validate newly added hypothesis entries. Remove invalid and duplicate ones."""
     before_ids = {h.get("id") for h in before}
     new_entries = [h for h in after if h.get("id") not in before_ids]
 
@@ -53,22 +107,29 @@ def _validate_new_entries(
     valid_count = 0
     invalid_ids = []
 
+    # Schema validation
     for entry in new_entries:
         entry.setdefault("generated_at", datetime.now(timezone.utc).isoformat())
         errors = validate_hypothesis_entry(entry, strict=False)
         if errors:
             log(f"GENERATE: invalid hypothesis {entry.get('id', '?')}: {errors}")
             invalid_ids.append(entry.get("id"))
-        else:
-            valid_count += 1
 
-    # Remove invalid entries or save updated entries (with generated_at)
+    # Duplicate approach detection — reject parameter variants of overtried families
+    duplicate_ids = _check_approach_duplicates(
+        [e for e in new_entries if e.get("id") not in invalid_ids],
+        project_dir,
+    )
+    invalid_ids.extend(duplicate_ids)
+
+    valid_count = len(new_entries) - len(invalid_ids)
+
+    # Remove invalid/duplicate entries or save updated entries
     if invalid_ids:
         cleaned = [h for h in after if h.get("id") not in invalid_ids]
         save_queue(project_dir, cleaned)
-        log(f"GENERATE: removed {len(invalid_ids)} invalid entries")
+        log(f"GENERATE: removed {len(invalid_ids)} entries ({len(duplicate_ids)} duplicate approach variants)")
     elif new_entries:
-        # Save back to persist generated_at timestamps
         save_queue(project_dir, after)
 
     return valid_count
@@ -100,6 +161,49 @@ def _build_pipeline_context(project: dict[str, Any], project_dir: Path) -> dict[
             f"2. Do NOT tweak the same levers as recent failures"
         )
 
+    # Build tried-families summary so AI knows what's been overdone
+    from .ledger import load_ledger
+    ledger = load_ledger(project_dir)
+    tried_families: dict[str, int] = {}
+    for row in ledger:
+        if row.get("class") == "BASELINE":
+            continue
+        approach = row.get("approach") or row.get("changed_variable", "")
+        family = _extract_model_family(approach)
+        if family:
+            tried_families[family] = tried_families.get(family, 0) + 1
+    saturated_families = [f"{f} ({c} experiments)" for f, c in tried_families.items() if c >= 3]
+    tried_msg = ""
+    if saturated_families:
+        tried_msg = (
+            f"SATURATED MODEL FAMILIES (do NOT generate more variants of these):\n"
+            f"  {', '.join(saturated_families)}\n"
+            f"Hypotheses using these families will be REJECTED. Try something fundamentally different."
+        )
+
+    # Stagnation detection
+    best_row = None
+    non_baseline = [r for r in ledger if r.get("class") != "BASELINE"]
+    if non_baseline:
+        from .ledger import find_best_result
+        mname = metric_name(project)
+        mdir = metric_direction(project)
+        best_row = find_best_result(ledger, mname, mdir)
+    stagnation_msg = ""
+    if best_row and non_baseline:
+        best_idx = next((i for i, r in enumerate(non_baseline) if r.get("id") == best_row.get("id")), None)
+        if best_idx is not None:
+            since_best = len(non_baseline) - 1 - best_idx
+            if since_best >= 20:
+                stagnation_msg = (
+                    f"STAGNATION WARNING: {since_best} experiments since last best result ({best_row.get('id')}).\n"
+                    f"Current approaches are NOT improving. You MUST try something radically different:\n"
+                    f"- Ensemble/stacking of existing models\n"
+                    f"- Feature engineering (interactions, PCA, encoding)\n"
+                    f"- Completely different paradigm (neural net, SVM, etc.)\n"
+                    f"- Preprocessing changes (scaling, outlier removal)"
+                )
+
     return {
         "project_name": project_name(project),
         "project_description": project_description(project),
@@ -113,6 +217,8 @@ def _build_pipeline_context(project: dict[str, Any], project_dir: Path) -> dict[
         "failure_history": _format_failure_history(project_dir, metric_name(project)),
         "generation_history": _format_history(history[-5:]),
         "escalation": escalation_msg,
+        "tried_families": tried_msg,
+        "stagnation": stagnation_msg,
     }
 
 
@@ -203,7 +309,7 @@ def generate_hypotheses(project: dict[str, Any], project_dir: Path, provider: An
 
 
 def _archive_generate_summary(project_dir: Path, valid_count: int) -> None:
-    """Read .generate_summary.json (written by AI), archive to .generate_history.jsonl."""
+    """Read summary from AI output or pipeline step files, archive to history."""
     summary_path = generate_summary_path(project_dir)
     history_path = generate_history_path(project_dir)
 
@@ -219,14 +325,39 @@ def _archive_generate_summary(project_dir: Path, valid_count: int) -> None:
         except json.JSONDecodeError:
             log("GENERATE: could not parse .generate_summary.json")
     else:
-        entry["state"] = "UNKNOWN"
-        entry["reasoning"] = "(AI did not write summary)"
+        # Fallback: read pipeline step outputs for partial summary
+        research_dir = project_dir / "research"
+        diagnose_path = research_dir / ".step_diagnose.json"
+        hypotheses_path = research_dir / ".step_hypotheses.json"
+
+        if diagnose_path.exists():
+            try:
+                diagnose = json.loads(diagnose_path.read_text())
+                entry["state"] = diagnose.get("state", "UNKNOWN")
+                entry["reasoning"] = diagnose.get("reasoning", "(from diagnose step)")
+                entry["best_so_far"] = diagnose.get("best_so_far", {})
+            except json.JSONDecodeError:
+                pass
+
+        if hypotheses_path.exists():
+            try:
+                hyp = json.loads(hypotheses_path.read_text())
+                entry.setdefault("hypotheses_added", hyp.get("hypotheses_added", []))
+                entry.setdefault("changes_made", hyp.get("changes_made", []))
+            except json.JSONDecodeError:
+                pass
+
+        if "state" not in entry:
+            entry["state"] = "UNKNOWN"
+            entry["reasoning"] = "(pipeline did not produce summary or diagnose output)"
 
     with history_path.open("a") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    # Clean up the per-cycle file
+    # Clean up per-cycle files
     summary_path.unlink(missing_ok=True)
+    for step_file in (project_dir / "research").glob(".step_*.json"):
+        step_file.unlink(missing_ok=True)
     log(f"GENERATE: archived summary (state={entry.get('state', '?')}, added={valid_count})")
 
 

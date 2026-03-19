@@ -194,16 +194,29 @@ Be objective. Score based on the criteria, not on effort."""
 
 
 def judge_verdict(project: dict[str, Any], new_metric: float | None, baseline_metric: float | None) -> str:
-    """Compare experiment metric against baseline."""
+    """Compare experiment metric against baseline.
+
+    Returns WIN only if improvement exceeds 1% delta. Smaller improvements
+    return MARGINAL to avoid noise being treated as real wins.
+    """
     if new_metric is None:
         return "INVALID"
     if baseline_metric is None:
         return "INCONCLUSIVE"
     direction = metric_direction(project)
+    if baseline_metric == 0:
+        return "WIN" if new_metric != 0 else "LOSS"
+
+    delta_pct = abs((new_metric - baseline_metric) / baseline_metric * 100)
+
     if direction == "minimize":
-        return "WIN" if new_metric < baseline_metric else "LOSS"
+        if new_metric < baseline_metric:
+            return "WIN" if delta_pct >= 1.0 else "MARGINAL"
+        return "LOSS"
     else:
-        return "WIN" if new_metric > baseline_metric else "LOSS"
+        if new_metric > baseline_metric:
+            return "WIN" if delta_pct >= 1.0 else "MARGINAL"
+        return "LOSS"
 
 
 def dispatch_evaluate(
