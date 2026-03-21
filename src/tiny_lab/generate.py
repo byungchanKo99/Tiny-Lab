@@ -250,7 +250,7 @@ def _format_history(entries: list[dict[str, Any]]) -> str:
         state = e.get("state", "?")
         reasoning = e.get("reasoning", "")[:120]
         added = e.get("hypotheses_added_count", 0)
-        changes = ", ".join(e.get("changes_made", []))
+        changes = ", ".join(str(c) for c in e.get("changes_made", []))
         lines.append(f"  Cycle {i}: state={state}, +{added} hypotheses")
         if reasoning:
             lines.append(f"    Reasoning: {reasoning}")
@@ -258,7 +258,7 @@ def _format_history(entries: list[dict[str, Any]]) -> str:
             lines.append(f"    Changes: {changes}")
         refs = e.get("references", [])
         if refs:
-            lines.append(f"    References: {', '.join(refs[:3])}")
+            lines.append(f"    References: {', '.join(str(r) for r in refs[:3])}")
     return "\n".join(lines)
 
 
