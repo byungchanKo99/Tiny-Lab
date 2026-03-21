@@ -4,13 +4,20 @@ PROJECT: {project_name}
 METRIC: {metric_name} (direction: {metric_direction})
 OPTIMIZER: {optimize_type} (time_budget: {time_budget}s, n_trials: {n_trials})
 
+DOMAIN: {research_domain_type}
+CONSTRAINTS: {research_constraints}
+
 DIAGNOSIS: {diagnose_state}
 {diagnose_reasoning}
 
 ANALYSIS PATTERNS: {analyze_patterns}
 FAILURE PATTERNS: {analyze_failure_patterns}
+DOMAIN MISMATCH: {analyze_domain_mismatch}
+GAP ANALYSIS (literature techniques not yet tried): {analyze_gap_analysis}
 
-RESEARCH TECHNIQUES: {research_techniques}
+UNEXPLORED DIRECTIONS (from research step): {research_unexplored_directions}
+
+{tried_families}
 
 LEVERS (for parameter flag mapping):
 {levers_text}
@@ -18,25 +25,42 @@ LEVERS (for parameter flag mapping):
 RULES:
 {rules_text}
 
-Based on the diagnosis, generate 3-5 hypotheses.
+Based on the diagnosis and gap analysis, generate 3-5 hypotheses.
+
+## Priority order for hypothesis generation:
+
+1. **Gap analysis first** — if literature suggests techniques not yet tried, prioritize those
+2. **Domain-appropriate** — approaches must fit the domain type (e.g., sequence models for time series, not random forest)
+3. **Fundamentally different** — each hypothesis should be a genuinely different strategy, not a parameter variant
+
+## Rules:
 
 YOU decide the STRATEGY (approach). The optimizer decides the PARAMETERS.
 
-- DO: "Try stacking ensemble", "Try feature engineering with PCA"
+- DO: "Try stacking ensemble", "Try Transformer encoder for sequence data"
 - DON'T: "Try lr=0.05" (this is the optimizer's job)
+- DON'T: Use approaches flagged as domain mismatches
 
-**If EXPLORING:** Try fundamentally different approaches (algorithms, architectures).
+**If EXPLORING:** Try approaches from gap_analysis and unexplored_directions.
 **If REFINING:** Suggest narrowing search_space or increasing n_trials for best approach.
-**If SATURATED:** Ensemble top approaches, novel architectures, feature engineering. At least 2 bold moves.
+**If SATURATED:** Ensemble top approaches, novel architectures, feature engineering. At least 2 bold moves from literature.
 **If STUCK:** Diagnose pipeline issues, try minimal experiment to verify baseline.
+
+## Approach naming:
+
+The approach name must match a key in `project.yaml` `search_space:`.
+
+- CORRECT: `approach: lstm`, `approach: stacking_ensemble`
+- WRONG: `approach: "python train.py --model lstm"` (command, not name)
+- WRONG: `approach: "lstm_high_hidden_size"` (parameter description)
 
 Each hypothesis MUST have:
 
-- id: H-{{next number}} (check existing IDs in research/hypothesis_queue.yaml)
+- id: H-{next number} (check existing IDs in research/hypothesis_queue.yaml)
 - status: pending
 - approach: "algorithm/method name"
-- description: "what and why"
-- reasoning: "cite technique, paper, prior experiment"
+- description: "what and why — cite the gap analysis or literature finding"
+- reasoning: "cite paper, benchmark, or prior experiment"
 
 Append to research/hypothesis_queue.yaml under the hypotheses key. Do NOT remove existing entries.
 

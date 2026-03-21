@@ -1,20 +1,39 @@
 {
   "type": "object",
-  "required": ["techniques", "references"],
+  "required": ["domain_type", "techniques", "references", "reasoning"],
   "properties": {
+    "domain_type": {
+      "type": "string",
+      "description": "Detected problem type (e.g., time_series_regression, tabular_classification, sensor_fusion)"
+    },
+    "data_characteristics": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Key data properties (e.g., sequential, multi-sensor, high_frequency, GPS-denied)"
+    },
+    "constraints": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Domain constraints (e.g., real-time, GPS-denied, class_imbalance)"
+    },
     "techniques": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "List of relevant techniques, models, or approaches found"
+      "description": "Relevant techniques with WHY each is relevant to this domain"
+    },
+    "unexplored_directions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Approaches not yet tried that literature suggests"
     },
     "references": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Papers, blog posts, benchmarks cited"
+      "description": "Papers, benchmarks, URLs cited (author, year, venue)"
     },
     "reasoning": {
       "type": "string",
-      "description": "Summary of research findings"
+      "description": "3-5 sentence summary connecting findings to this project"
     }
   }
 }

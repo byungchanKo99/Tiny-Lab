@@ -4,7 +4,6 @@
     "total_experiments",
     "wins",
     "losses",
-    "invalids",
     "best_experiment",
     "patterns"
   ],
@@ -12,6 +11,7 @@
     "total_experiments": { "type": "integer" },
     "wins": { "type": "integer" },
     "losses": { "type": "integer" },
+    "marginals": { "type": "integer" },
     "invalids": { "type": "integer" },
     "best_experiment": {
       "type": "object",
@@ -31,6 +31,16 @@
       "type": "array",
       "items": { "type": "string" },
       "description": "Common failure patterns to avoid"
+    },
+    "domain_mismatch": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Approaches that don't fit the domain type"
+    },
+    "gap_analysis": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Literature techniques not yet tried"
     }
   }
 }
