@@ -156,8 +156,8 @@ def build_board_data(project_dir: Path) -> dict[str, Any] | None:
 
     metric_name = project["metric"]["name"]
     direction = project["metric"].get("direction", "minimize")
-    ledger = load_ledger(project_dir)
-    baseline = get_baseline_metric(project_dir, metric_name)
+    ledger = load_ledger(project_dir, skip_validation=True)  # fast read, no per-row validation
+    baseline = get_baseline_metric(project_dir, metric_name, ledger=ledger)  # reuse loaded ledger
     queue = load_queue(project_dir)
 
     # Best result
@@ -202,26 +202,33 @@ def build_board_data(project_dir: Path) -> dict[str, Any] | None:
                 opt = row.get("optimize_result", {})
                 approach_summary[key]["best_params"] = opt.get("best_params", {})
 
-    # Build diff for each experiment
+    # Build diff only for recent rows + best row (not entire ledger)
     lever_baselines = get_levers(project)
+    rows_needing_diff = set()
+    for row in ledger[-10:]:  # last 10 displayed in table
+        rows_needing_diff.add(id(row))
+    if best_row:
+        rows_needing_diff.add(id(best_row))
     for row in ledger:
-        row["_diff"] = _build_experiment_diff(row, lever_baselines)
-        # Flatten optimizer best_params for easy display
-        opt = row.get("optimize_result", {})
-        if opt.get("best_params"):
-            row["_best_params_str"] = ", ".join(f"{k}={v}" for k, v in opt["best_params"].items())
+        if id(row) in rows_needing_diff:
+            row["_diff"] = _build_experiment_diff(row, lever_baselines)
+            opt = row.get("optimize_result", {})
+            if opt.get("best_params"):
+                row["_best_params_str"] = ", ".join(f"{k}={v}" for k, v in opt["best_params"].items())
+            else:
+                row["_best_params_str"] = ""
         else:
+            row["_diff"] = ""
             row["_best_params_str"] = ""
 
     # --- Insights ---
     insights: dict[str, Any] = {}
     non_baseline = [r for r in ledger if r.get("class") != "BASELINE"]
 
-    # Experiment rate & timing
+    # Experiment rate & timing (reuse events loaded below)
+    all_events = load_events(project_dir, last_n=999)
     if len(non_baseline) >= 2:
-        from .events import load_events as _load_events
-        events = _load_events(project_dir, last_n=999)
-        done_events = [e for e in events if e.get("event") == "experiment_done"]
+        done_events = [e for e in all_events if e.get("event") == "experiment_done"]
         if len(done_events) >= 2:
             from datetime import datetime
             try:
@@ -314,5 +321,5 @@ def build_board_data(project_dir: Path) -> dict[str, Any] | None:
         "approach_summary": approach_summary,
         "insights": insights,
         "gen_history": load_generate_history(project_dir),
-        "recent_events": load_events(project_dir, last_n=10),
+        "recent_events": all_events[-10:],
     }

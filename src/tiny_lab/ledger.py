@@ -11,8 +11,13 @@ from .paths import ledger_path
 from .schemas import validate, ValidationError
 
 
-def load_ledger(project_dir: Path) -> list[dict[str, Any]]:
-    """Load all ledger entries from ledger.jsonl."""
+def load_ledger(project_dir: Path, *, skip_validation: bool = False) -> list[dict[str, Any]]:
+    """Load all ledger entries from ledger.jsonl.
+
+    Args:
+        skip_validation: If True, skip per-row schema validation for speed.
+            Use for read-only operations like dashboard display.
+    """
     path = ledger_path(project_dir)
     if not path.exists():
         return []
@@ -25,10 +30,10 @@ def load_ledger(project_dir: Path) -> list[dict[str, Any]]:
             entry = json.loads(raw)
         except json.JSONDecodeError:
             continue
-        # Warn on invalid entries but still include them
-        errors = validate(entry, "ledger_entry", strict=False)
-        if errors:
-            log(f"LEDGER: warning — entry {entry.get('id', '?')} has issues: {errors}")
+        if not skip_validation:
+            errors = validate(entry, "ledger_entry", strict=False)
+            if errors:
+                log(f"LEDGER: warning — entry {entry.get('id', '?')} has issues: {errors}")
         rows.append(entry)
     return rows
 
@@ -41,9 +46,14 @@ def append_ledger(project_dir: Path, entry: dict[str, Any]) -> None:
         f.write(json.dumps(entry, sort_keys=True) + "\n")
 
 
-def get_baseline_metric(project_dir: Path, metric_name: str) -> float | None:
-    """Get the baseline metric value from the ledger."""
-    for row in reversed(load_ledger(project_dir)):
+def get_baseline_metric(project_dir: Path, metric_name: str, ledger: list[dict[str, Any]] | None = None) -> float | None:
+    """Get the baseline metric value from the ledger.
+
+    Args:
+        ledger: Pre-loaded ledger to avoid re-reading the file.
+    """
+    rows = ledger if ledger is not None else load_ledger(project_dir, skip_validation=True)
+    for row in reversed(rows):
         if row.get("class") == "BASELINE":
             pm = row.get("primary_metric", {})
             if metric_name in pm:

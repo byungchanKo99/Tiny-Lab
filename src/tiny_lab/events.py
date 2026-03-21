@@ -74,12 +74,24 @@ def emit_event(
 
 
 def load_events(project_dir: Path, last_n: int = 50) -> list[dict[str, Any]]:
-    """Load the most recent N events."""
+    """Load the most recent N events.
+
+    For large event files, reads from the end of the file to avoid
+    parsing the entire history.
+    """
     path = _events_path(project_dir)
     if not path.exists():
         return []
+
+    # For small files or large last_n, read everything
+    content = path.read_text()
+    lines = content.splitlines()
+
+    # Only parse the tail we need (+ buffer for blank/invalid lines)
+    tail = lines[-(last_n * 2):] if len(lines) > last_n * 2 else lines
+
     rows: list[dict[str, Any]] = []
-    for line in path.read_text().splitlines():
+    for line in tail:
         line = line.strip()
         if not line:
             continue
