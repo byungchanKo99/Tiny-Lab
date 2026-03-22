@@ -118,8 +118,9 @@ class ResearchLoop:
         self._shutdown = True
 
     def _check_circuit_breaker(self) -> bool:
-        rows = load_ledger(self.project_dir)
+        rows = load_ledger(self.project_dir, skip_validation=True)
         recent = rows[-CIRCUIT_BREAKER_WINDOW:]
+        # Only count true experiment INVALID, not infra errors (INFRA_ERROR)
         invalid_count = sum(1 for r in recent if r.get("class") == "INVALID")
         if invalid_count >= CIRCUIT_BREAKER_THRESHOLD - 1 and invalid_count < CIRCUIT_BREAKER_THRESHOLD:
             self._emit(EventType.CIRCUIT_BREAKER_WARNING, {
@@ -318,7 +319,7 @@ class ResearchLoop:
             project, ctx.run_result, ctx.hypothesis, ctx.exp_id,
             self.project_dir, self.provider,
         )
-        ctx.verdict = judge_verdict(project, ctx.new_metric, baseline_metric)
+        ctx.verdict = judge_verdict(project, ctx.new_metric, baseline_metric, run_result=ctx.run_result)
         log(f"EVALUATE[{etype}]: {ctx.exp_id} -> {ctx.verdict} ({mname}={ctx.new_metric}, baseline={baseline_metric})")
         return State.RECORD
 

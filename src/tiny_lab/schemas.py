@@ -64,7 +64,7 @@ LEDGER_ENTRY = {
         "hypothesis_id": str, "config": dict, "reasoning": str,
         "optimize_result": dict, "approach": str,
     },
-    "enums": {"class": {"WIN", "LOSS", "INVALID", "INCONCLUSIVE", "BASELINE", "MARGINAL"}},
+    "enums": {"class": {"WIN", "LOSS", "INVALID", "INCONCLUSIVE", "BASELINE", "MARGINAL", "INFRA_ERROR"}},
 }
 
 PROJECT_CONFIG = {

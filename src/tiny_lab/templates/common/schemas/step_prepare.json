@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "required": ["verified"],
+  "properties": {
+    "verified": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Approach names that were verified working via smoke test"
+    },
+    "installed_packages": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Packages installed (e.g., catboost, torch)"
+    },
+    "code_changes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Changes made to experiment script (e.g., added catboost model case)"
+    },
+    "lever_changes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Levers added to project.yaml"
+    },
+    "failed": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Approaches that could not be made to work (with reason)"
+    }
+  }
+}

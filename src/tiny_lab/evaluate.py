@@ -193,13 +193,31 @@ Be objective. Score based on the criteria, not on effort."""
     return None
 
 
-def judge_verdict(project: dict[str, Any], new_metric: float | None, baseline_metric: float | None) -> str:
+_INFRA_ERROR_PATTERNS = [
+    "ModuleNotFoundError", "ImportError", "No module named",
+    "unrecognized arguments", "error: argument", "invalid choice",
+]
+
+
+def classify_infra_error(run_result: Any) -> bool:
+    """Check if a failed run is an infrastructure error (not experiment failure)."""
+    if run_result is None:
+        return False
+    stderr = getattr(run_result, "stderr", "") or ""
+    return any(pattern in stderr for pattern in _INFRA_ERROR_PATTERNS)
+
+
+def judge_verdict(project: dict[str, Any], new_metric: float | None, baseline_metric: float | None,
+                  run_result: Any = None) -> str:
     """Compare experiment metric against baseline.
 
     Returns WIN only if improvement exceeds 1% delta. Smaller improvements
-    return MARGINAL to avoid noise being treated as real wins.
+    return MARGINAL. Infrastructure errors (missing packages, bad flags)
+    return INFRA_ERROR instead of INVALID so circuit breaker ignores them.
     """
     if new_metric is None:
+        if classify_infra_error(run_result):
+            return "INFRA_ERROR"
         return "INVALID"
     if baseline_metric is None:
         return "INCONCLUSIVE"

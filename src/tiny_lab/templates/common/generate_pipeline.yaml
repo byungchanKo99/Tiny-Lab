@@ -28,9 +28,16 @@ steps:
     requires: [diagnose, analyze]
     output_schema: schemas/step_hypotheses.json
 
+  - id: prepare
+    description: "Ensure hypotheses are executable — install deps, add code, add flags"
+    prompt_template: prompts/generate/prepare.md
+    tools: [Read, Write, Edit, Bash]
+    requires: [hypotheses]
+    output_schema: schemas/step_prepare.json
+
   - id: summary
     description: "Write generation summary"
     prompt_template: prompts/generate/summary.md
     tools: [Read, Write]
-    requires: [hypotheses, diagnose]
+    requires: [prepare, hypotheses, diagnose]
     output_schema: schemas/generate_summary.json
