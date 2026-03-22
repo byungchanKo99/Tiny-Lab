@@ -101,6 +101,40 @@ class TestDispatchBuild:
         assert dispatch_build(project, hyp, None) == "special.sh"
 
 
+class TestApproachModelMapping:
+    """approach → model mapping via approaches section."""
+
+    def test_approach_uses_model_from_approaches(self):
+        """When approaches section defines model, --model gets the model value, not approach name."""
+        project = _project()
+        project["approaches"] = {"lgbm_tuned": {"model": "lgbm"}}
+        project["levers"]["model"] = {"flag": "--model", "baseline": "logistic"}
+        project["baseline"]["command"] = "python train.py --model logistic --lr 0.01 --epochs 10"
+        hyp = {"id": "H-1", "approach": "lgbm_tuned", "description": "test"}
+        result = dispatch_build(project, hyp, None)
+        assert "--model lgbm" in result
+        assert "--model lgbm_tuned" not in result
+
+    def test_approach_falls_back_to_approach_name(self):
+        """Without approaches section, approach name is used as model value."""
+        project = _project()
+        project["levers"]["model"] = {"flag": "--model", "baseline": "logistic"}
+        project["baseline"]["command"] = "python train.py --model logistic --lr 0.01 --epochs 10"
+        hyp = {"id": "H-1", "approach": "xgboost", "description": "test"}
+        result = dispatch_build(project, hyp, None)
+        assert "--model xgboost" in result
+
+    def test_approach_name_equals_model(self):
+        """When approach name == model name in approaches, it still works."""
+        project = _project()
+        project["approaches"] = {"stacking": {"model": "stacking"}}
+        project["levers"]["model"] = {"flag": "--model", "baseline": "logistic"}
+        project["baseline"]["command"] = "python train.py --model logistic --lr 0.01 --epochs 10"
+        hyp = {"id": "H-1", "approach": "stacking", "description": "test"}
+        result = dispatch_build(project, hyp, None)
+        assert "--model stacking" in result
+
+
 class TestImmutableFilesPrompt:
     """F1: immutable_files warning injected into code build prompt."""
 

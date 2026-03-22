@@ -19,9 +19,13 @@ For each newly added hypothesis:
 
 ### 2a. Model/approach support
 
-- Does the experiment script support `--model {approach_name}`?
+- Check `project.yaml` `approaches:` section — does the approach have a `model` mapping?
+  - If YES → the actual `--model` value is `approaches.{approach}.model` (not the approach name)
+  - If NO → the approach name is used directly as `--model` value
+- Does the experiment script support `--model {model_value}`?
 - If NOT → **add the model implementation to the script**
-- Example: if approach is `catboost` but train.py has no catboost case → add it
+- Example: if approach is `lgbm_tuned` with `model: lgbm`, check train.py supports `--model lgbm`
+- If a new approach needs to be registered → **add it to `approaches:` in project.yaml** with the correct `model` and `description`
 
 ### 2b. Package dependencies
 

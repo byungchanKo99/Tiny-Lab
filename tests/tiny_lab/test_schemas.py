@@ -123,7 +123,6 @@ class TestValidateProjectDeep:
             "name": "test",
             "baseline": {"command": "echo hi"},
             "metric": {"name": "loss"},
-            "levers": {"lr": {"space": [0.01, 0.1]}},
         }
 
     def test_valid_minimal(self):
@@ -141,18 +140,30 @@ class TestValidateProjectDeep:
         errors = validate_project_deep(proj, strict=False)
         assert any("baseline.command" in e for e in errors)
 
+    def test_valid_without_levers(self):
+        """Project without levers is valid (approaches-only projects)."""
+        proj = self._minimal_project()
+        assert validate_project_deep(proj, strict=False) == []
+
     def test_lever_without_space_is_valid(self):
         """Levers no longer require 'space' — search_space handles param ranges."""
         proj = self._minimal_project()
-        proj["levers"]["lr"] = {"flag": "--lr", "baseline": 0.1}
+        proj["levers"] = {"lr": {"flag": "--lr", "baseline": 0.1}}
         errors = validate_project_deep(proj, strict=False)
         assert not any("space" in e for e in errors)
 
     def test_lever_not_dict(self):
         proj = self._minimal_project()
-        proj["levers"]["lr"] = "not_a_dict"
+        proj["levers"] = {"lr": "not_a_dict"}
         errors = validate_project_deep(proj, strict=False)
         assert errors
+
+    def test_valid_with_approaches(self):
+        proj = self._minimal_project()
+        proj["approaches"] = {
+            "lgbm_tuned": {"model": "lgbm", "description": "LightGBM tuning"},
+        }
+        assert validate_project_deep(proj, strict=False) == []
 
     def test_missing_top_level_required(self):
         errors = validate_project_deep({"name": "x"}, strict=False)

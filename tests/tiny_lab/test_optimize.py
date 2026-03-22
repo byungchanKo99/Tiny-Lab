@@ -354,6 +354,31 @@ class TestDispatchOptimize:
         result = dispatch_optimize(project, "echo", hypothesis, Path("/tmp"), "EXP-002")
         assert result is not None
 
+    @patch("tiny_lab.optimize.run_experiment_command")
+    def test_approach_uses_model_from_approaches(self, mock_run):
+        """dispatch_optimize injects model from approaches section, not approach name."""
+        mock_run.return_value = subprocess.CompletedProcess(
+            args="", returncode=0, stdout='{"loss": 0.5}\n', stderr="",
+        )
+        project = {
+            "metric": {"name": "loss", "direction": "minimize"},
+            "levers": {"model": {"flag": "--model", "baseline": "logistic"}},
+            "optimize": {"type": "random", "n_trials": 1},
+            "approaches": {"lgbm_tuned": {"model": "lgbm"}},
+            "search_space": {
+                "lgbm_tuned": {"lr": {"type": "float", "low": 0.001, "high": 0.1}},
+            },
+        }
+        hypothesis = {"id": "H-1", "approach": "lgbm_tuned", "description": "test"}
+        result = dispatch_optimize(
+            project, "python train.py --model logistic", hypothesis, Path("/tmp"), "EXP-002",
+        )
+        assert result is not None
+        # Verify the command passed to run used "lgbm" not "lgbm_tuned"
+        cmd_arg = mock_run.call_args[0][1]  # second positional arg is command
+        assert "--model lgbm" in cmd_arg
+        assert "lgbm_tuned" not in cmd_arg
+
     def test_unknown_optimizer_raises(self):
         project = {
             "metric": {"name": "loss", "direction": "minimize"},

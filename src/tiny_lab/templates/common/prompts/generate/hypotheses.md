@@ -48,9 +48,11 @@ YOU decide the STRATEGY (approach). The optimizer decides the PARAMETERS.
 
 ## Approach naming:
 
-The approach name must match a key in `project.yaml` `search_space:`.
+The approach name must match a key in `project.yaml` `approaches:` (if defined) or `search_space:`.
 
-- CORRECT: `approach: lstm`, `approach: stacking_ensemble`
+- If `approaches:` exists, the approach name maps to a `model` value via `approaches.{name}.model`
+- If `approaches:` does not exist, the approach name is used directly as the `--model` value
+- CORRECT: `approach: lgbm_tuned` (maps to `model: lgbm` via approaches), `approach: stacking_ensemble`
 - WRONG: `approach: "python train.py --model lstm"` (command, not name)
 - WRONG: `approach: "lstm_high_hidden_size"` (parameter description)
 

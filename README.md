@@ -135,18 +135,31 @@ levers:
     flag: "--max-depth"
     baseline: 6
 
-# Per-approach parameter definitions — each approach gets only its own params
+# Approach name → execution config (model, description)
+# Separates approach identity from actual --model value
+approaches:
+  lgbm_tuned:
+    model: lgbm # --model lgbm (not lgbm_tuned)
+    description: "LightGBM hyperparameter tuning"
+  lgbm_regularized:
+    model: lgbm # same model, different search_space
+    description: "LightGBM with strong regularization"
+  xgboost:
+    model: xgb
+    description: "XGBoost gradient boosting"
+
+# Per-approach parameter definitions — pure optimizer config
 search_space:
-  lightgbm:
+  lgbm_tuned:
     num_leaves: { type: int, low: 20, high: 127 }
     learning_rate: { type: float, low: 0.01, high: 0.3, log: true }
     n_estimators: { type: int, low: 50, high: 500 }
+  lgbm_regularized:
+    reg_alpha: { type: float, low: 0.0, high: 10.0 }
+    reg_lambda: { type: float, low: 0.0, high: 10.0 }
   xgboost:
     max_depth: { type: int, low: 3, high: 15 }
     learning_rate: { type: float, low: 0.01, high: 0.3, log: true }
-  random_forest:
-    n_estimators: { type: int, low: 50, high: 500 }
-    max_depth: { type: int, low: 3, high: 20 }
 
 # Built-in: grid, random. External tools: custom + optimize_script
 optimize:
@@ -166,14 +179,14 @@ Your experiment script must print the metric as JSON to stdout:
 
 ## Hypothesis Format
 
-Each hypothesis picks an **approach** — a short strategy name matching a key in `search_space`:
+Each hypothesis picks an **approach** — a strategy name matching a key in `approaches:` (or `search_space:`):
 
 ```yaml
 hypotheses:
   - id: H-001
     status: pending
-    approach: lightgbm
-    description: "LightGBM gradient boosting"
+    approach: lgbm_tuned
+    description: "LightGBM hyperparameter tuning"
     reasoning: "Leaf-wise growth often outperforms on tabular data"
   - id: H-002
     status: pending
@@ -182,7 +195,7 @@ hypotheses:
     reasoning: "L1/L2 regularization for robust generalization"
 ```
 
-The `model` lever auto-injects the approach name into the baseline command (`--model logistic` → `--model lightgbm`). The optimizer then tunes only the parameters defined for that approach in `search_space`.
+The `model` lever auto-injects the **model** value (from `approaches:`) into the baseline command. For example, `approach: lgbm_tuned` → `approaches.lgbm_tuned.model: lgbm` → `--model lgbm`. The optimizer then tunes only the parameters defined for that approach in `search_space`.
 
 ## Plugin Types
 
@@ -246,7 +259,7 @@ pip install -e ".[dev]"
 pytest tests/tiny_lab/
 ```
 
-247 tests covering state machine, optimizer inner loop, pipeline engine, approach dedup, stagnation detection, MARGINAL verdict, YAML recovery, and more.
+253 tests covering state machine, optimizer inner loop, pipeline engine, approach dedup, stagnation detection, MARGINAL verdict, YAML recovery, and more.
 
 ## Credits
 

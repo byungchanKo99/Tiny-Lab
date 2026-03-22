@@ -68,12 +68,16 @@ LEDGER_ENTRY = {
 }
 
 PROJECT_CONFIG = {
-    "required": {"name": str, "baseline": dict, "metric": dict, "levers": dict},
+    "required": {"name": str, "baseline": dict, "metric": dict},
     "optional": {
         "description": str, "build": dict, "run": dict, "evaluate": dict,
         "schema_version": int,
         "lane": str, "workdir": str, "calibration": dict, "rules": list,
         "immutable_files": list,
+        "levers": dict,
+        "approaches": dict,
+        "search_space": dict,
+        "optimize": dict,
     },
 }
 

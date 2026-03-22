@@ -33,7 +33,8 @@ Discovery will scan data/scripts, analyze them, and set up everything.
 
 **MANDATORY in project.yaml:**
 
-- `search_space` — per-approach parameter definitions (e.g., `lightgbm: {num_leaves: ...}`)
+- `approaches` — maps approach names to execution config (`model`, `description`). Use when approach names differ from actual model names (e.g., `lgbm_tuned → model: lgbm`).
+- `search_space` — per-approach parameter definitions (e.g., `lgbm_tuned: {n_estimators: ...}`)
 - `optimize` — optimizer config (`type: random`, `time_budget: 300`, `n_trials: 20`)
 - `levers` — CLI flag mappings including a `model` lever if approaches use different models
 

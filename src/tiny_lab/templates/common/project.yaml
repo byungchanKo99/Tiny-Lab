@@ -25,10 +25,27 @@ metric:
   direction: minimize # minimize | maximize
 
 levers:
+  model:
+    flag: "--model"
+    baseline: logistic
   example_lever:
     flag: "--example"
     baseline: 1.0
     space: [0.5, 1.0, 2.0]
+
+# approaches:              # approach name → execution config (model, description)
+#   lgbm_tuned:
+#     model: lgbm          # actual --model value (≠ approach name)
+#     description: "LightGBM hyperparameter tuning"
+#   lgbm_regularized:
+#     model: lgbm
+#     description: "LightGBM with strong regularization"
+#   xgboost:
+#     model: xgb
+#     description: "XGBoost gradient boosting"
+#   stacking_ensemble:
+#     model: stacking_ensemble  # approach name = model name
+#     description: "Top 3 model stacking"
 
 # calibration:
 #   wall_clock_minutes: 5
@@ -39,17 +56,15 @@ levers:
 #   time_budget: 300      # seconds per hypothesis (default: 300 = 5 min)
 #   n_trials: 20          # max trials (default: 20)
 
-# search_space:           # Per-approach parameter definitions
-#   lightgbm:
-#     num_leaves: {type: int, low: 20, high: 127}
-#     learning_rate: {type: float, low: 0.01, high: 0.3, log: true}
+# search_space:           # Per-approach parameter definitions (pure optimizer config)
+#   lgbm_tuned:
 #     n_estimators: {type: int, low: 50, high: 500}
+#     learning_rate: {type: float, low: 0.01, high: 0.3, log: true}
+#   lgbm_regularized:
+#     reg_alpha: {type: float, low: 0.0, high: 10.0}
 #   xgboost:
 #     max_depth: {type: int, low: 3, high: 15}
 #     learning_rate: {type: float, low: 0.01, high: 0.3, log: true}
-#   random_forest:
-#     n_estimators: {type: int, low: 50, high: 500}
-#     max_depth: {type: int, low: 3, high: 20}
 
 rules:
   - "Change command-line flags only"

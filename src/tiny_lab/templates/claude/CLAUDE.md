@@ -24,10 +24,18 @@ Every project MUST have `search_space` and `optimize` in project.yaml. Without t
 
 **When writing project.yaml:**
 
+- `approaches` maps approach names to execution config (model, description) — REQUIRED when approach names differ from model names
 - `search_space` defines parameter types and ranges per approach — REQUIRED
 - `optimize` configures the optimizer (type, time_budget, n_trials) — REQUIRED
 - `levers` maps parameter names to CLI flags — REQUIRED for optimizer to inject params
 - **Model selection lever**: If different approaches use different models, you MUST have a lever that maps to the model CLI flag (e.g., `--model`). Without this, every approach runs the same baseline model.
+
+**Key: `approaches` separates approach identity from model names.**
+
+- Approach name = strategy identity (e.g., `lgbm_tuned`, `lgbm_regularized`)
+- `model` field = actual `--model` CLI value (e.g., `lgbm`)
+- Multiple approaches can share the same model with different search_space configs
+- If no `approaches` section, approach name is used as model value (fallback)
 
 Example: if train.py accepts `--model lgbm`, `--model xgb`, etc., add:
 
@@ -43,17 +51,28 @@ And the baseline command should use this flag: `python train.py --model logistic
 Example:
 
 ```yaml
-search_space: # Per-approach — each approach gets only its own params
-  lightgbm:
+approaches: # approach name → execution config
+  lgbm_tuned:
+    model: lgbm # --model lgbm (not lgbm_tuned)
+    description: "LightGBM hyperparameter tuning"
+  lgbm_regularized:
+    model: lgbm # same model, different search_space
+    description: "LightGBM with strong regularization"
+  xgboost:
+    model: xgb
+    description: "XGBoost gradient boosting"
+
+search_space: # Per-approach — pure optimizer config
+  lgbm_tuned:
     num_leaves: { type: int, low: 20, high: 127 }
     learning_rate: { type: float, low: 0.01, high: 0.3, log: true }
     n_estimators: { type: int, low: 50, high: 500 }
+  lgbm_regularized:
+    reg_alpha: { type: float, low: 0.0, high: 10.0 }
+    reg_lambda: { type: float, low: 0.0, high: 10.0 }
   xgboost:
     max_depth: { type: int, low: 3, high: 15 }
     learning_rate: { type: float, low: 0.01, high: 0.3, log: true }
-  random_forest:
-    n_estimators: { type: int, low: 50, high: 500 }
-    max_depth: { type: int, low: 3, high: 20 }
 
 optimize:
   type: random
@@ -61,6 +80,9 @@ optimize:
   n_trials: 20
 
 levers: # CLI flag mapping for optimizer to inject params
+  model:
+    flag: "--model"
+    baseline: logistic
   learning_rate:
     flag: "--lr"
     baseline: 0.1
@@ -308,6 +330,7 @@ The `research/project.yaml` file controls the experiment. Key sections:
 - **baseline.command** — the command to run (levers replace flags in this command)
 - **metric.name** — which metric to extract from stdout JSON
 - **metric.direction** — `minimize` or `maximize`
+- **approaches** — maps approach names to execution config (model, description)
 - **levers** — each lever has a `flag`, `baseline` value, and `space` of values to try
 - **search_space** — parameter type definitions for the optimizer (type, range, choices)
 - **optimize** — optimizer config (type, time_budget, n_trials)

@@ -7,7 +7,7 @@ from typing import Any
 
 from .errors import BuildError
 from .logging import log
-from .project import baseline_command, build_config, build_type, immutable_files, levers, project_name, project_description
+from .project import baseline_command, build_config, build_type, immutable_files, levers, model_for_approach, project_name, project_description
 from .providers.base import AIProvider
 
 
@@ -125,19 +125,20 @@ def dispatch_build(
         if "approach" in hypothesis and "lever" not in hypothesis:
             cmd = baseline_command(project)
             approach = hypothesis["approach"]
+            model = model_for_approach(project, approach)
 
-            # Inject approach into command via model lever if available
+            # Inject model into command via model lever if available
             if "model" in project_levers:
                 import re
                 model_lever = project_levers["model"]
                 flag = model_lever["flag"]
                 bl = str(model_lever.get("baseline", ""))
                 pattern = re.compile(re.escape(flag) + r"\s+" + re.escape(bl))
-                replacement = f"{flag} {approach}"
+                replacement = f"{flag} {model}"
                 if pattern.search(cmd):
                     cmd = pattern.sub(replacement, cmd)
                 else:
-                    cmd = f"{cmd} {flag} {approach}"
+                    cmd = f"{cmd} {flag} {model}"
             else:
                 log(f"BUILD: WARNING — approach '{approach}' but no 'model' lever "
                     f"to inject model selection. All approaches may run the same model.")

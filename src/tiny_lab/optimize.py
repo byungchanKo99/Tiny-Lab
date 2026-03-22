@@ -19,7 +19,7 @@ from typing import Any
 from .errors import OptimizeError
 from .evaluate import extract_metric_from_stdout
 from .logging import log
-from .project import metric_name as _metric_name, metric_direction as _metric_direction, levers as _levers, workdir as _workdir, search_space_for_approach as _search_space_for_approach, optimize_config as _optimize_config
+from .project import metric_name as _metric_name, metric_direction as _metric_direction, levers as _levers, model_for_approach as _model_for_approach, workdir as _workdir, search_space_for_approach as _search_space_for_approach, optimize_config as _optimize_config
 from .run import run_experiment_command
 
 
@@ -422,21 +422,22 @@ def dispatch_optimize(
     if not search_space_raw:
         return None
 
-    # Inject approach into base_command via model lever if available
+    # Inject model into base_command via model lever if available
     # This ensures each approach actually runs its model, not the baseline model
     lever_defs = _levers(project)
     if approach and "model" in lever_defs:
         import re
+        model = _model_for_approach(project, approach)
         model_lever = lever_defs["model"]
         flag = model_lever["flag"]
         bl = str(model_lever.get("baseline", ""))
         pattern = re.compile(re.escape(flag) + r"\s+" + re.escape(bl))
-        replacement = f"{flag} {approach}"
+        replacement = f"{flag} {model}"
         if pattern.search(base_command):
             base_command = pattern.sub(replacement, base_command)
         else:
-            base_command = f"{base_command} {flag} {approach}"
-        log(f"OPTIMIZE: injected model={approach} via {flag} into command")
+            base_command = f"{base_command} {flag} {model}"
+        log(f"OPTIMIZE: injected model={model} (approach={approach}) via {flag} into command")
 
     search_space = parse_search_space(search_space_raw)
     opt_cfg = _optimize_config(project)

@@ -12,7 +12,8 @@ This project uses the `tiny-lab` autonomous research loop. The loop runs experim
 
 Every project MUST have `search_space` and `optimize` in project.yaml.
 
-- `search_space` defines parameter types and ranges (e.g., `lr: {type: float, low: 0.001, high: 1.0}`)
+- `approaches` maps approach names to execution config (`model`, `description`). Use when approach names differ from actual model names (e.g., `lgbm_tuned` → `model: lgbm`). Without this, approach name is used as `--model` value directly.
+- `search_space` defines parameter types and ranges per approach (e.g., `lgbm_tuned: {lr: {type: float, low: 0.001, high: 1.0}}`)
 - `optimize` configures the optimizer (e.g., `type: random, time_budget: 300, n_trials: 20`)
 - The experiment script MUST accept hyperparameters as CLI flags (e.g., `--lr`, `--max_depth`)
 

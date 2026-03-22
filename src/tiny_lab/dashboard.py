@@ -12,7 +12,7 @@ from .events import load_events
 from .generate import load_generate_history
 from .ledger import load_ledger, get_baseline_metric, find_best_result
 from .paths import state_path, lock_path, queue_path
-from .project import load_project, levers as get_levers, baseline_command as get_baseline_cmd
+from .project import load_project, levers as get_levers, approach_config as get_approach_config, baseline_command as get_baseline_cmd
 from .queue import load_queue
 
 
@@ -188,7 +188,12 @@ def build_board_data(project_dir: Path) -> dict[str, Any] | None:
             continue
         key = row.get("approach") or row.get("changed_variable", "unknown")
         if key not in approach_summary:
-            approach_summary[key] = {"wins": 0, "losses": 0, "best_value": None, "best_params": {}}
+            acfg = get_approach_config(project, key)
+            approach_summary[key] = {
+                "wins": 0, "losses": 0, "best_value": None, "best_params": {},
+                "description": acfg.get("description", ""),
+                "model": acfg.get("model", key),
+            }
         cls = row.get("class", "")
         if cls == "WIN":
             approach_summary[key]["wins"] += 1

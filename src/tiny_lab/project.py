@@ -84,6 +84,20 @@ def levers(p: dict[str, Any]) -> dict[str, Any]:
     return p.get("levers", {})
 
 
+def approaches(p: dict[str, Any]) -> dict[str, Any]:
+    return p.get("approaches", {})
+
+
+def approach_config(p: dict[str, Any], approach: str) -> dict[str, Any]:
+    return p.get("approaches", {}).get(approach, {})
+
+
+def model_for_approach(p: dict[str, Any], approach: str) -> str:
+    """Return the actual model value for an approach. Falls back to approach name."""
+    cfg = approach_config(p, approach)
+    return cfg.get("model", approach)
+
+
 def search_space(p: dict[str, Any]) -> dict[str, Any]:
     return p.get("search_space", {})
 

@@ -241,10 +241,11 @@ Which metric do you want to optimize? Are these the right levers?
 | 3   | `metric.name` + `metric.direction`       | From ANALYZE metric candidates + user choice. Direction: "accuracy"/"score"/"revenue" → maximize, "loss"/"error"/"cost" → minimize. |
 | 4   | `baseline.command`                       | From script analysis (flags + defaults). If no script → ask user.                                                                   |
 | 5   | `levers` (name, flag, baseline for each) | Map each hyperparameter to its CLI flag. Needed for optimizer to inject params.                                                     |
-| 6   | `search_space` (param types + ranges)    | Define parameter types and reasonable ranges for each hyperparameter. **MANDATORY.**                                                |
-| 7   | `optimize` (type, time_budget, n_trials) | Default: `type: random, time_budget: 300, n_trials: 20`. **MANDATORY.**                                                             |
-| 8   | `run.type`                               | Default: `command`. Only ask if user mentioned pipeline.                                                                            |
-| 9   | `evaluate.type`                          | Default: `stdout_json`. Only ask if output isn't JSON (e.g., screenshots → `llm`).                                                  |
+| 6   | `approaches` (name → model + desc)       | Map approach names to actual model values. Required when approach name ≠ model name (e.g., `lgbm_tuned → model: lgbm`).             |
+| 7   | `search_space` (param types + ranges)    | Define parameter types and reasonable ranges per approach. **MANDATORY.**                                                           |
+| 8   | `optimize` (type, time_budget, n_trials) | Default: `type: random, time_budget: 300, n_trials: 20`. **MANDATORY.**                                                             |
+| 9   | `run.type`                               | Default: `command`. Only ask if user mentioned pipeline.                                                                            |
+| 10  | `evaluate.type`                          | Default: `stdout_json`. Only ask if output isn't JSON (e.g., screenshots → `llm`).                                                  |
 
 **Actions:**
 
@@ -263,7 +264,7 @@ Which metric do you want to optimize? Are these the right levers?
 - Numeric hyperparameter → `search_space` entry with type/low/high (e.g., `lr: {type: float, low: 0.001, high: 1.0, log: true}`)
 - Categorical parameter → `search_space` entry with choices (e.g., `model: {type: categorical, choices: [lgbm, xgb, rf]}`)
 
-**Exit condition:** All 9 fields filled (including search_space and optimize) → **update state file** with `phase: CONCRETIZE` and filled fields → go to **Phase 4: SETUP**
+**Exit condition:** All 10 fields filled (including approaches, search_space and optimize) → **update state file** with `phase: CONCRETIZE` and filled fields → go to **Phase 4: SETUP**
 
 ---
 
@@ -300,14 +301,22 @@ Which metric do you want to optimize? Are these the right levers?
      direction: { maximize|minimize }
 
    levers:
+     model:
+       flag: "--model"
+       baseline: { default_model }
      { lever_name }:
        flag: "{flag}"
        baseline: { baseline_value }
 
+   approaches:
+     { approach_name }:
+       model: { actual_model_name } # --model value
+       description: "{approach description}"
+
    search_space:
-     { param_name }: { type: float, low: 0.001, high: 1.0, log: true }
-     { param_name }: { type: int, low: 3, high: 15 }
-     { param_name }: { type: categorical, choices: [a, b, c] }
+     { approach_name }:
+       { param_name }: { type: float, low: 0.001, high: 1.0, log: true }
+       { param_name }: { type: int, low: 3, high: 15 }
 
    optimize:
      type: random
