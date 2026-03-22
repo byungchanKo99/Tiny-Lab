@@ -41,6 +41,24 @@
       "type": "array",
       "items": { "type": "string" },
       "description": "Literature techniques not yet tried"
+    },
+    "optimizer_efficiency": {
+      "type": "object",
+      "properties": {
+        "underexplored": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Approaches with insufficient trials (approach name + trial count + time/trial)"
+        },
+        "time_budget_sufficient": {
+          "type": "boolean",
+          "description": "Whether current time_budget allows sufficient trials for all approaches"
+        },
+        "recommended_time_budget": {
+          "type": ["integer", "null"],
+          "description": "Recommended time_budget if current is insufficient, null if adequate"
+        }
+      }
     }
   }
 }

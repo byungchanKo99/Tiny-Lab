@@ -6,7 +6,11 @@ from pathlib import Path
 
 import yaml
 
-from tiny_lab.generate import _format_history, _format_failure_history, _check_escalation, _validate_new_entries
+from tiny_lab.generate import (
+    _format_history, _format_failure_history, _check_escalation,
+    _validate_new_entries, _build_trial_summary, _validate_optimize_changes,
+    _OPTIMIZE_LIMITS, _MAX_CHANGE_RATIO,
+)
 
 
 class TestFormatHistory:
@@ -149,6 +153,120 @@ class TestCheckEscalation:
         ]
         # Last 3: SATURATED, SATURATED, EXPLORING → only 1 non-saturated → no escalation
         assert _check_escalation(history) is None
+
+
+class TestBuildTrialSummary:
+    def test_empty_ledger(self):
+        assert _build_trial_summary([], {"time_budget": 300, "n_trials": 20}) == ""
+
+    def test_skips_baseline(self):
+        ledger = [{"class": "BASELINE", "approach": "baseline"}]
+        assert _build_trial_summary(ledger, {"time_budget": 300, "n_trials": 20}) == ""
+
+    def test_flags_underexplored(self):
+        ledger = [
+            {
+                "class": "WIN", "approach": "xgb_tuned", "id": "EXP-002",
+                "optimize_result": {"n_trials": 20, "total_seconds": 180, "best_value": 0.85},
+            },
+            {
+                "class": "WIN", "approach": "lgbm_tuned", "id": "EXP-003",
+                "optimize_result": {"n_trials": 5, "total_seconds": 300, "best_value": 0.84},
+            },
+        ]
+        result = _build_trial_summary(ledger, {"time_budget": 300, "n_trials": 20})
+        assert "UNDEREXPLORED" in result
+        assert "lgbm_tuned" in result
+        # xgb_tuned should NOT be flagged (20/20 trials)
+        assert "xgb_tuned" in result
+        lines = result.split("\n")
+        xgb_line = [l for l in lines if "xgb_tuned" in l][0]
+        assert "UNDEREXPLORED" not in xgb_line
+
+    def test_sufficient_trials_no_flag(self):
+        ledger = [
+            {
+                "class": "WIN", "approach": "rf", "id": "EXP-002",
+                "optimize_result": {"n_trials": 20, "total_seconds": 100, "best_value": 0.8},
+            },
+        ]
+        result = _build_trial_summary(ledger, {"time_budget": 300, "n_trials": 20})
+        rf_line = [l for l in result.split("\n") if "rf" in l][0]
+        assert "UNDEREXPLORED" not in rf_line
+
+    def test_no_optimize_result_skipped(self):
+        ledger = [{"class": "WIN", "approach": "manual", "id": "EXP-002"}]
+        assert _build_trial_summary(ledger, {"time_budget": 300, "n_trials": 20}) == ""
+
+
+class TestValidateOptimizeChanges:
+    def _setup_project(self, tmp_path, optimize_cfg):
+        research = tmp_path / "research"
+        research.mkdir(exist_ok=True)
+        project = {
+            "name": "test",
+            "baseline": {"command": "echo test"},
+            "metric": {"name": "loss"},
+            "optimize": optimize_cfg,
+        }
+        (research / "project.yaml").write_text(yaml.dump(project))
+        return tmp_path
+
+    def test_no_changes_returns_empty(self, tmp_path):
+        self._setup_project(tmp_path, {"type": "random", "time_budget": 300, "n_trials": 20})
+        changes = _validate_optimize_changes(tmp_path, {"type": "random", "time_budget": 300, "n_trials": 20})
+        assert changes == []
+
+    def test_valid_increase(self, tmp_path):
+        self._setup_project(tmp_path, {"type": "random", "time_budget": 600, "n_trials": 20})
+        changes = _validate_optimize_changes(tmp_path, {"time_budget": 300, "n_trials": 20})
+        assert len(changes) == 1
+        assert "time_budget" in changes[0]
+        assert "600" in changes[0]
+
+    def test_clamps_above_maximum(self, tmp_path):
+        self._setup_project(tmp_path, {"type": "random", "time_budget": 5000, "n_trials": 20})
+        changes = _validate_optimize_changes(tmp_path, {"time_budget": 300, "n_trials": 20})
+        # Should be clamped: 5000 > 1800 (max), and also 5000/300 > 3x ratio
+        project = yaml.safe_load((tmp_path / "research" / "project.yaml").read_text())
+        assert project["optimize"]["time_budget"] <= 1800
+
+    def test_clamps_below_minimum(self, tmp_path):
+        self._setup_project(tmp_path, {"type": "random", "time_budget": 10, "n_trials": 20})
+        changes = _validate_optimize_changes(tmp_path, {"time_budget": 300, "n_trials": 20})
+        project = yaml.safe_load((tmp_path / "research" / "project.yaml").read_text())
+        # 10/300 = 0.033x < 1/3x ratio → clamped to 100, then 100 >= 60 min → 100
+        assert project["optimize"]["time_budget"] >= 60
+
+    def test_clamps_ratio_increase(self, tmp_path):
+        # 300 * 3x = 900. Setting to 1500 should be ratio-clamped to 900.
+        self._setup_project(tmp_path, {"type": "random", "time_budget": 1500, "n_trials": 20})
+        changes = _validate_optimize_changes(tmp_path, {"time_budget": 300, "n_trials": 20})
+        project = yaml.safe_load((tmp_path / "research" / "project.yaml").read_text())
+        assert project["optimize"]["time_budget"] == 900
+
+    def test_clamps_ratio_decrease(self, tmp_path):
+        # 900 / 3x = 300. Setting to 100 should be ratio-clamped first, then abs-clamped.
+        self._setup_project(tmp_path, {"type": "random", "time_budget": 100, "n_trials": 20})
+        changes = _validate_optimize_changes(tmp_path, {"time_budget": 900, "n_trials": 20})
+        project = yaml.safe_load((tmp_path / "research" / "project.yaml").read_text())
+        # 100/900 = 0.11x < 1/3x → clamped to max(900/3, 60) = 300
+        assert project["optimize"]["time_budget"] == 300
+
+    def test_n_trials_clamped(self, tmp_path):
+        self._setup_project(tmp_path, {"type": "random", "time_budget": 300, "n_trials": 500})
+        changes = _validate_optimize_changes(tmp_path, {"time_budget": 300, "n_trials": 20})
+        project = yaml.safe_load((tmp_path / "research" / "project.yaml").read_text())
+        # 500/20 = 25x > 3x ratio → clamped to 60, then 60 >= 5 min → 60
+        assert project["optimize"]["n_trials"] == 60
+
+    def test_no_optimize_section(self, tmp_path):
+        research = tmp_path / "research"
+        research.mkdir(exist_ok=True)
+        project = {"name": "test", "baseline": {"command": "echo"}, "metric": {"name": "loss"}}
+        (research / "project.yaml").write_text(yaml.dump(project))
+        changes = _validate_optimize_changes(tmp_path, {"time_budget": 300})
+        assert changes == []
 
 
 class TestValidateNewEntries:

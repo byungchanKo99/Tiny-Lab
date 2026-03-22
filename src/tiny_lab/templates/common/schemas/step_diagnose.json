@@ -18,6 +18,11 @@
         "metric_value": { "type": "number" },
         "config": { "type": "string" }
       }
+    },
+    "meta_actions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Recommended optimize config changes (e.g., increase time_budget). Empty if none needed."
     }
   }
 }

@@ -6,8 +6,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from .logging import log
-from .paths import generate_summary_path, generate_history_path
+from .paths import generate_summary_path, generate_history_path, project_yaml_path
 from .queue import load_queue, save_queue, pending_hypotheses
 from .schemas import validate_hypothesis_entry, ValidationError
 
@@ -24,7 +26,6 @@ def _sanitize_queue_yaml(project_dir: Path) -> None:
     if not path.exists():
         return
     try:
-        import yaml
         data = yaml.safe_load(path.read_text())
         if data and "hypotheses" in data:
             # Re-save through yaml.dump — this quotes all unsafe strings
@@ -144,10 +145,11 @@ def _build_pipeline_context(project: dict[str, Any], project_dir: Path) -> dict[
 
     levers_desc = []
     for name, lever in levers(project).items():
+        space = lever.get("space", [])
         if "flag" in lever:
-            levers_desc.append(f"  {name}: flag={lever['flag']}, baseline={lever['baseline']}, space={lever['space']}")
+            levers_desc.append(f"  {name}: flag={lever['flag']}, baseline={lever.get('baseline', '?')}, space={space}")
         else:
-            levers_desc.append(f"  {name}: type={lever.get('type', 'choice')}, space={lever['space']}")
+            levers_desc.append(f"  {name}: type={lever.get('type', 'choice')}, space={space}")
 
     opt_cfg = optimize_config(project)
     history = load_generate_history(project_dir)
@@ -161,13 +163,15 @@ def _build_pipeline_context(project: dict[str, Any], project_dir: Path) -> dict[
             f"2. Do NOT tweak the same levers as recent failures"
         )
 
-    # Build tried-families summary so AI knows what's been overdone
-    from .ledger import load_ledger
+    # Single pass over ledger: tried families + non-baseline collection
+    from .ledger import load_ledger, find_best_result
     ledger = load_ledger(project_dir)
     tried_families: dict[str, int] = {}
+    non_baseline: list[dict[str, Any]] = []
     for row in ledger:
         if row.get("class") == "BASELINE":
             continue
+        non_baseline.append(row)
         approach = row.get("approach") or row.get("changed_variable", "")
         family = _extract_model_family(approach)
         if family:
@@ -183,9 +187,7 @@ def _build_pipeline_context(project: dict[str, Any], project_dir: Path) -> dict[
 
     # Stagnation detection
     best_row = None
-    non_baseline = [r for r in ledger if r.get("class") != "BASELINE"]
     if non_baseline:
-        from .ledger import find_best_result
         mname = metric_name(project)
         mdir = metric_direction(project)
         best_row = find_best_result(ledger, mname, mdir)
@@ -219,7 +221,47 @@ def _build_pipeline_context(project: dict[str, Any], project_dir: Path) -> dict[
         "escalation": escalation_msg,
         "tried_families": tried_msg,
         "stagnation": stagnation_msg,
+        "trial_summary": _build_trial_summary(ledger, opt_cfg),
     }
+
+
+def _build_trial_summary(ledger: list[dict[str, Any]], opt_cfg: dict[str, Any]) -> str:
+    """Build per-approach trial count summary for optimizer efficiency analysis."""
+    time_budget = opt_cfg.get("time_budget", 300)
+    max_trials = opt_cfg.get("n_trials", 20)
+    entries: list[str] = []
+
+    for row in ledger:
+        if row.get("class") == "BASELINE":
+            continue
+        approach = row.get("approach") or row.get("changed_variable", "")
+        opt = row.get("optimize_result", {})
+        n_trials = opt.get("n_trials", 0)
+        total_secs = opt.get("total_seconds", 0)
+        best_val = opt.get("best_value")
+        if n_trials == 0:
+            continue
+
+        time_per_trial = total_secs / n_trials if n_trials > 0 else 0
+        # Flag as underexplored if used less than half the max_trials
+        sufficient = n_trials >= max(max_trials * 0.5, 10)
+        flag = "" if sufficient else " ⚠ UNDEREXPLORED"
+        entries.append(
+            f"  {row.get('id', '?')} ({approach}): "
+            f"{n_trials}/{max_trials} trials, "
+            f"{time_per_trial:.1f}s/trial, "
+            f"total={total_secs:.0f}s/{time_budget}s budget, "
+            f"best={best_val}{flag}"
+        )
+
+    if not entries:
+        return ""
+
+    header = (
+        f"OPTIMIZER TRIAL SUMMARY (time_budget={time_budget}s, max_trials={max_trials}):\n"
+        f"Approaches marked ⚠ UNDEREXPLORED may rank lower due to insufficient trials, not model quality.\n"
+    )
+    return header + "\n".join(entries)
 
 
 def _format_failure_history(project_dir: Path, metric_name: str) -> str:
@@ -273,6 +315,87 @@ def _check_escalation(history: list[dict[str, Any]]) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Guard rails for meta-actions (optimize config changes)
+# ---------------------------------------------------------------------------
+
+_OPTIMIZE_LIMITS = {
+    "time_budget": (60, 1800),     # 1 min to 30 min
+    "n_trials": (5, 200),          # 5 to 200
+}
+_MAX_CHANGE_RATIO = 3.0  # max 3x change per cycle
+
+
+def _validate_optimize_changes(project_dir: Path, original_cfg: dict[str, Any]) -> list[str]:
+    """Validate and clamp any optimize config changes made by the pipeline.
+
+    Returns list of changes applied (for logging/summary).
+    """
+    path = project_yaml_path(project_dir)
+    if not path.exists():
+        return []
+
+    data = yaml.safe_load(path.read_text())
+    if not data or "optimize" not in data:
+        return []
+
+    current = data["optimize"]
+    changes: list[str] = []
+    clamped = False
+
+    for key, (lo, hi) in _OPTIMIZE_LIMITS.items():
+        if key not in current:
+            continue
+        new_val = current[key]
+        old_val = original_cfg.get(key)
+
+        if not isinstance(new_val, (int, float)):
+            continue
+
+        # Check if changed
+        if old_val is not None and new_val == old_val:
+            continue
+
+        # Apply ratio limit first (against original value, before absolute clamp)
+        if old_val and old_val > 0:
+            ratio = new_val / old_val
+            if ratio > _MAX_CHANGE_RATIO:
+                capped = int(old_val * _MAX_CHANGE_RATIO)
+                log(f"GENERATE: clamping optimize.{key} from {new_val} to {capped} "
+                    f"(max {_MAX_CHANGE_RATIO}x increase per cycle)")
+                new_val = capped
+                clamped = True
+            elif ratio < 1.0 / _MAX_CHANGE_RATIO:
+                floored = max(int(old_val / _MAX_CHANGE_RATIO), lo)
+                log(f"GENERATE: clamping optimize.{key} from {new_val} to {floored} "
+                    f"(max {_MAX_CHANGE_RATIO}x decrease per cycle)")
+                new_val = floored
+                clamped = True
+
+        # Then clamp to absolute limits
+        if new_val < lo:
+            log(f"GENERATE: clamping optimize.{key} from {new_val} to {lo} (minimum)")
+            new_val = lo
+            clamped = True
+        elif new_val > hi:
+            log(f"GENERATE: clamping optimize.{key} from {new_val} to {hi} (maximum)")
+            new_val = hi
+            clamped = True
+
+        current[key] = new_val
+        if old_val != new_val:
+            changes.append(f"optimize.{key}: {old_val} → {new_val}")
+
+    if clamped:
+        data["optimize"] = current
+        path.write_text(yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False))
+
+    if changes:
+        log(f"GENERATE: optimize config changed: {', '.join(changes)}")
+
+    return changes
+
+
 def generate_hypotheses(project: dict[str, Any], project_dir: Path, provider: Any) -> bool:
     """Generate new hypotheses using metadata-driven pipeline.
 
@@ -280,13 +403,20 @@ def generate_hypotheses(project: dict[str, Any], project_dir: Path, provider: An
     Step order is enforced by the pipeline engine, not by prompt instructions.
     """
     from .pipeline import run_pipeline
+    from .project import optimize_config
 
     pipeline_path = Path(__file__).parent / "templates" / "common" / "generate_pipeline.yaml"
     context = _build_pipeline_context(project, project_dir)
 
+    # Snapshot optimize config before pipeline (for guard rail comparison)
+    original_opt_cfg = dict(optimize_config(project))
+
     before = load_queue(project_dir)
 
     result = run_pipeline(pipeline_path, context, provider, project_dir)
+
+    # Guard rail: validate any optimize config changes made by the pipeline
+    opt_changes = _validate_optimize_changes(project_dir, original_opt_cfg)
 
     if not result.success:
         log(f"GENERATE: pipeline failed at step '{list(result.steps.keys())[-1] if result.steps else '?'}'")
@@ -296,19 +426,19 @@ def generate_hypotheses(project: dict[str, Any], project_dir: Path, provider: An
         valid_count = _validate_new_entries(before, after, project_dir)
         if valid_count > 0:
             log(f"GENERATE: salvaged {valid_count} hypotheses from partial pipeline run")
-        _archive_generate_summary(project_dir, valid_count)
+        _archive_generate_summary(project_dir, valid_count, opt_changes)
         return valid_count > 0
 
     # Post-processing (same as before)
     _sanitize_queue_yaml(project_dir)
     after = load_queue(project_dir)
     valid_count = _validate_new_entries(before, after, project_dir)
-    _archive_generate_summary(project_dir, valid_count)
+    _archive_generate_summary(project_dir, valid_count, opt_changes)
 
     return valid_count > 0
 
 
-def _archive_generate_summary(project_dir: Path, valid_count: int) -> None:
+def _archive_generate_summary(project_dir: Path, valid_count: int, opt_changes: list[str] | None = None) -> None:
     """Read summary from AI output or pipeline step files, archive to history."""
     summary_path = generate_summary_path(project_dir)
     history_path = generate_history_path(project_dir)
@@ -317,6 +447,8 @@ def _archive_generate_summary(project_dir: Path, valid_count: int) -> None:
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "hypotheses_added_count": valid_count,
     }
+    if opt_changes:
+        entry["optimize_changes"] = opt_changes
 
     if summary_path.exists():
         try:

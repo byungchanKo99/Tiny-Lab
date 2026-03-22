@@ -20,6 +20,7 @@ from .errors import OptimizeError
 from .evaluate import extract_metric_from_stdout
 from .logging import log
 from .project import metric_name as _metric_name, metric_direction as _metric_direction, levers as _levers, model_for_approach as _model_for_approach, workdir as _workdir, search_space_for_approach as _search_space_for_approach, optimize_config as _optimize_config
+from .build import inject_flag
 from .run import run_experiment_command
 
 
@@ -106,21 +107,13 @@ def build_trial_command(
     1. If the param name matches a lever with a 'flag' mapping, substitute the flag.
     2. Otherwise, append --param_name value.
     """
-    import re
     cmd = base_command
     lever_defs = _levers(project)
 
     for param_name, value in params.items():
         lever = lever_defs.get(param_name)
         if lever and "flag" in lever:
-            flag = lever["flag"]
-            baseline_value = str(lever.get("baseline", ""))
-            pattern = re.compile(re.escape(flag) + r"\s+" + re.escape(baseline_value))
-            replacement = f"{flag} {value}"
-            if pattern.search(cmd):
-                cmd = pattern.sub(replacement, cmd)
-            else:
-                cmd = f"{cmd} {flag} {value}"
+            cmd = inject_flag(cmd, lever["flag"], lever.get("baseline", ""), value)
         else:
             cmd = f"{cmd} --{param_name} {value}"
 
@@ -426,18 +419,10 @@ def dispatch_optimize(
     # This ensures each approach actually runs its model, not the baseline model
     lever_defs = _levers(project)
     if approach and "model" in lever_defs:
-        import re
         model = _model_for_approach(project, approach)
         model_lever = lever_defs["model"]
-        flag = model_lever["flag"]
-        bl = str(model_lever.get("baseline", ""))
-        pattern = re.compile(re.escape(flag) + r"\s+" + re.escape(bl))
-        replacement = f"{flag} {model}"
-        if pattern.search(base_command):
-            base_command = pattern.sub(replacement, base_command)
-        else:
-            base_command = f"{base_command} {flag} {model}"
-        log(f"OPTIMIZE: injected model={model} (approach={approach}) via {flag} into command")
+        base_command = inject_flag(base_command, model_lever["flag"], model_lever.get("baseline", ""), model)
+        log(f"OPTIMIZE: injected model={model} (approach={approach}) via {model_lever['flag']} into command")
 
     search_space = parse_search_space(search_space_raw)
     opt_cfg = _optimize_config(project)

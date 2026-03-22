@@ -31,6 +31,24 @@ Pay special attention to:
 - Are the tried approaches appropriate for this domain type? (e.g., using tabular models for time series data is suboptimal)
 - Which literature-suggested techniques from UNEXPLORED DIRECTIONS haven't been tried yet?
 
+## Optimizer Efficiency Analysis (CRITICAL)
+
+{trial_summary}
+
+For each approach in the ledger, check `optimize_result`:
+
+- **n_trials**: How many trials did the optimizer actually run?
+- **total_seconds**: How long did optimization take?
+- **time_per_trial**: total_seconds / n_trials — slow models get fewer trials
+- **Is the ranking fair?** An approach with 3 trials vs one with 20 trials is NOT a fair comparison. The 3-trial approach may rank lower simply because it didn't explore enough, not because the model is worse.
+
+Flag any approach where:
+
+- n_trials < 50% of configured max_trials → **UNDEREXPLORED**
+- time_per_trial > time_budget / 10 → **time_budget too low for this model**
+
+If underexplored approaches exist, recommend increasing `time_budget` in the `optimizer_efficiency` section.
+
 Write your analysis as JSON to research/.step_analyze.json with:
 
 - total_experiments: total count
@@ -40,3 +58,4 @@ Write your analysis as JSON to research/.step_analyze.json with:
 - failure_patterns: common failure patterns to avoid
 - domain_mismatch: approaches that don't fit the domain (e.g., "random_forest used for time series without windowing")
 - gap_analysis: techniques from literature not yet tried
+- optimizer_efficiency: object with fields — underexplored (list of "approach (N trials, Xs/trial)"), time_budget_sufficient (boolean), recommended_time_budget (integer or null)

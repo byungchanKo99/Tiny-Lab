@@ -17,6 +17,9 @@ GAP ANALYSIS (literature techniques not yet tried): {analyze_gap_analysis}
 
 UNEXPLORED DIRECTIONS (from research step): {research_unexplored_directions}
 
+OPTIMIZER EFFICIENCY: {analyze_optimizer_efficiency}
+META-ACTIONS RECOMMENDED: {diagnose_meta_actions}
+
 {tried_families}
 
 LEVERS (for parameter flag mapping):

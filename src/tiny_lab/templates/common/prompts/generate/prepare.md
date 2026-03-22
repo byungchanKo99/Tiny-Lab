@@ -55,6 +55,22 @@ For each newly added hypothesis:
 - If it fails → diagnose and fix before continuing
 - If it prints valid JSON with the metric → confirmed working
 
+### 2f. Adjust optimize config (if meta-actions recommended)
+
+META-ACTIONS: {diagnose_meta_actions}
+OPTIMIZER EFFICIENCY: {analyze_optimizer_efficiency}
+
+If the diagnose step recommended meta-actions (e.g., increase time_budget):
+
+- Read the current `optimize` section in `research/project.yaml`
+- Apply the recommended changes (e.g., `time_budget: 600`)
+- **Guard rails are enforced by the system** — your changes will be clamped to safe ranges:
+  - `time_budget`: 60–1800 seconds, max 3x increase per cycle
+  - `n_trials`: 5–200, max 3x increase per cycle
+- If no meta-actions are recommended, skip this step
+
+Example: if `time_budget: 300` and models need 60s/trial (only 5 trials), increase to `time_budget: 600` to allow ~10 trials.
+
 ## Step 3: Report
 
 Write results as JSON to research/.step_prepare.json with:

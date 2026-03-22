@@ -22,6 +22,11 @@
       "items": { "type": "string" },
       "description": "Levers added to project.yaml"
     },
+    "optimize_changes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Changes to optimize config (e.g., time_budget: 300 → 600)"
+    },
     "failed": {
       "type": "array",
       "items": { "type": "string" },

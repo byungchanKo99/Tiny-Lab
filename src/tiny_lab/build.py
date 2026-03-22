@@ -11,21 +11,22 @@ from .project import baseline_command, build_config, build_type, immutable_files
 from .providers.base import AIProvider
 
 
+def inject_flag(cmd: str, flag: str, old_value: str, new_value: Any) -> str:
+    """Replace a CLI flag's value in a command string, or append if not present."""
+    pattern = re.compile(re.escape(flag) + r"\s+" + re.escape(str(old_value)))
+    replacement = f"{flag} {new_value}"
+    if pattern.search(cmd):
+        return pattern.sub(replacement, cmd)
+    return f"{cmd} {flag} {new_value}"
+
+
 def build_command_flag(project: dict[str, Any], hypothesis: dict[str, Any]) -> str:
     """Replace a lever's CLI flag in the baseline command. Deterministic, no LLM."""
     cmd = baseline_command(project)
     lever_name = hypothesis["lever"]
     value = hypothesis["value"]
     lever = levers(project)[lever_name]
-    flag = lever["flag"]
-    baseline_value = lever["baseline"]
-
-    pattern = re.compile(re.escape(flag) + r"\s+" + re.escape(str(baseline_value)))
-    replacement = f"{flag} {value}"
-
-    if pattern.search(cmd):
-        return pattern.sub(replacement, cmd)
-    return f"{cmd} {flag} {value}"
+    return inject_flag(cmd, lever["flag"], lever["baseline"], value)
 
 
 def build_command_multi_flag(project: dict[str, Any], hypothesis: dict[str, Any]) -> str:
@@ -35,14 +36,7 @@ def build_command_multi_flag(project: dict[str, Any], hypothesis: dict[str, Any]
     project_levers = levers(project)
     for lever_name, value in values.items():
         lever = project_levers[lever_name]
-        flag = lever["flag"]
-        baseline_value = lever["baseline"]
-        pattern = re.compile(re.escape(flag) + r"\s+" + re.escape(str(baseline_value)))
-        replacement = f"{flag} {value}"
-        if pattern.search(cmd):
-            cmd = pattern.sub(replacement, cmd)
-        else:
-            cmd = f"{cmd} {flag} {value}"
+        cmd = inject_flag(cmd, lever["flag"], lever["baseline"], value)
     return cmd
 
 
@@ -129,16 +123,8 @@ def dispatch_build(
 
             # Inject model into command via model lever if available
             if "model" in project_levers:
-                import re
                 model_lever = project_levers["model"]
-                flag = model_lever["flag"]
-                bl = str(model_lever.get("baseline", ""))
-                pattern = re.compile(re.escape(flag) + r"\s+" + re.escape(bl))
-                replacement = f"{flag} {model}"
-                if pattern.search(cmd):
-                    cmd = pattern.sub(replacement, cmd)
-                else:
-                    cmd = f"{cmd} {flag} {model}"
+                cmd = inject_flag(cmd, model_lever["flag"], model_lever.get("baseline", ""), model)
             else:
                 log(f"BUILD: WARNING — approach '{approach}' but no 'model' lever "
                     f"to inject model selection. All approaches may run the same model.")

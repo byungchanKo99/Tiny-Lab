@@ -29,10 +29,10 @@ steps:
     output_schema: schemas/step_hypotheses.json
 
   - id: prepare
-    description: "Ensure hypotheses are executable — install deps, add code, add flags"
+    description: "Ensure hypotheses are executable — install deps, add code, add flags, adjust optimizer"
     prompt_template: prompts/generate/prepare.md
     tools: [Read, Write, Edit, Bash]
-    requires: [hypotheses]
+    requires: [hypotheses, diagnose, analyze]
     output_schema: schemas/step_prepare.json
 
   - id: summary
