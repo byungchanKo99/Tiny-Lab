@@ -9,6 +9,7 @@ import yaml
 from tiny_lab.generate import (
     _format_history, _format_failure_history, _check_escalation,
     _validate_new_entries, _build_trial_summary, _validate_optimize_changes,
+    _get_approach_family, _extract_model_prefix,
     _OPTIMIZE_LIMITS, _MAX_CHANGE_RATIO,
 )
 
@@ -153,6 +154,47 @@ class TestCheckEscalation:
         ]
         # Last 3: SATURATED, SATURATED, EXPLORING → only 1 non-saturated → no escalation
         assert _check_escalation(history) is None
+
+
+class TestExtractModelPrefix:
+    def test_known_prefix(self):
+        assert _extract_model_prefix("lgbm_tuned") == "lgbm"
+        assert _extract_model_prefix("xgb_deep") == "xgb"
+        assert _extract_model_prefix("et_scaled_subsample") == "et"
+        assert _extract_model_prefix("extra_trees_deep") == "extra_trees"
+        assert _extract_model_prefix("random_forest_tuned") == "random_forest"
+
+    def test_exact_match(self):
+        assert _extract_model_prefix("lgbm") == "lgbm"
+        assert _extract_model_prefix("et") == "et"
+
+    def test_unknown_returns_none(self):
+        assert _extract_model_prefix("my_custom_model") is None
+        assert _extract_model_prefix("novel_architecture") is None
+
+    def test_longer_prefix_wins(self):
+        # "random_forest" should match before "rf" would
+        assert _extract_model_prefix("random_forest_deep") == "random_forest"
+        assert _extract_model_prefix("extra_trees_tuned") == "extra_trees"
+
+
+class TestGetApproachFamily:
+    def test_uses_approaches_section(self):
+        project = {"approaches": {"lgbm_tuned": {"model": "lgbm"}}}
+        assert _get_approach_family(project, "lgbm_tuned") == "lgbm"
+
+    def test_falls_back_to_prefix(self):
+        project = {}
+        assert _get_approach_family(project, "et_scaled_subsample") == "et"
+
+    def test_falls_back_to_approach_name(self):
+        project = {}
+        assert _get_approach_family(project, "my_novel_algo") == "my_novel_algo"
+
+    def test_approaches_model_takes_priority(self):
+        # Even though "xgb" prefix would match, approaches section should win
+        project = {"approaches": {"xgb_special": {"model": "xgboost_custom"}}}
+        assert _get_approach_family(project, "xgb_special") == "xgboost_custom"
 
 
 class TestBuildTrialSummary:

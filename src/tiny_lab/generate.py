@@ -39,22 +39,40 @@ def _sanitize_queue_yaml(project_dir: Path) -> None:
             log("GENERATE: restored queue from backup")
 
 
-def _extract_model_family(approach: str) -> str | None:
-    """Extract the base model family from an approach name.
+def _get_approach_family(project: dict[str, Any], approach: str) -> str:
+    """Determine the model family for duplicate detection.
 
-    'lgbm_high_capacity' → 'lgbm'
-    'xgboost_deep_tuned' → 'xgboost'
-    'stacking_ensemble' → None (genuinely new)
+    Priority:
+    1. model_for_approach() — uses approaches: section in project.yaml
+       If model != approach, the model IS the family (e.g., lgbm_tuned → lgbm)
+    2. Prefix heuristic — matches known model name prefixes
+    3. Returns approach name unchanged — treated as its own unique family
     """
-    known_families = [
-        "lgbm", "lightgbm", "xgboost", "xgb", "rf", "random_forest",
-        "gbm", "gradient_boosting", "catboost", "logistic", "lr",
-        "svm", "knn", "neural", "mlp", "ada", "adaboost",
-    ]
+    from .project import model_for_approach
+    model = model_for_approach(project, approach)
+    if model != approach:
+        return model
+    return _extract_model_prefix(approach) or approach
+
+
+# Sorted longest-first so "random_forest" matches before "random" would
+_KNOWN_PREFIXES = sorted([
+    "lgbm", "lightgbm", "xgboost", "xgb", "rf", "random_forest",
+    "gbm", "gradient_boosting", "catboost", "logistic", "lr",
+    "svm", "knn", "neural", "mlp", "ada", "adaboost",
+    "et", "extra_trees", "dt", "decision_tree",
+    "lasso", "ridge", "elasticnet", "svr", "sgd",
+    "lstm", "gru", "transformer", "cnn", "rnn",
+    "stacking", "blending", "voting",
+], key=len, reverse=True)
+
+
+def _extract_model_prefix(approach: str) -> str | None:
+    """Fallback heuristic: match approach name against known model prefixes."""
     approach_lower = approach.lower()
-    for family in known_families:
-        if approach_lower.startswith(family) or f"_{family}" in approach_lower:
-            return family
+    for prefix in _KNOWN_PREFIXES:
+        if approach_lower.startswith(prefix + "_") or approach_lower == prefix:
+            return prefix
     return None
 
 
@@ -67,6 +85,14 @@ def _check_approach_duplicates(
     Returns list of IDs to reject with reasons logged.
     """
     from .ledger import load_ledger
+    from .project import load_project
+
+    try:
+        project = load_project(project_dir)
+    except Exception:
+        # If project can't be loaded, skip duplicate detection
+        return []
+
     ledger = load_ledger(project_dir)
 
     # Collect model families already tried
@@ -75,15 +101,18 @@ def _check_approach_duplicates(
         if row.get("class") == "BASELINE":
             continue
         approach = row.get("approach") or row.get("changed_variable", "")
-        family = _extract_model_family(approach)
-        if family:
-            tried_families[family] = tried_families.get(family, 0) + 1
+        if not approach:
+            continue
+        family = _get_approach_family(project, approach)
+        tried_families[family] = tried_families.get(family, 0) + 1
 
     reject_ids = []
     for entry in new_entries:
         approach = entry.get("approach", "")
-        family = _extract_model_family(approach)
-        if family and tried_families.get(family, 0) >= 3:
+        if not approach:
+            continue
+        family = _get_approach_family(project, approach)
+        if tried_families.get(family, 0) >= 3:
             log(f"GENERATE: rejecting {entry.get('id', '?')} — "
                 f"'{approach}' is a variant of '{family}' "
                 f"(already {tried_families[family]} experiments). "
@@ -173,9 +202,10 @@ def _build_pipeline_context(project: dict[str, Any], project_dir: Path) -> dict[
             continue
         non_baseline.append(row)
         approach = row.get("approach") or row.get("changed_variable", "")
-        family = _extract_model_family(approach)
-        if family:
-            tried_families[family] = tried_families.get(family, 0) + 1
+        if not approach:
+            continue
+        family = _get_approach_family(project, approach)
+        tried_families[family] = tried_families.get(family, 0) + 1
     saturated_families = [f"{f} ({c} experiments)" for f, c in tried_families.items() if c >= 3]
     tried_msg = ""
     if saturated_families:

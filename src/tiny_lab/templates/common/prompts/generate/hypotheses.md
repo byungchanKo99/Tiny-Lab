@@ -45,8 +45,8 @@ YOU decide the STRATEGY (approach). The optimizer decides the PARAMETERS.
 - DON'T: Use approaches flagged as domain mismatches
 
 **If EXPLORING:** Try approaches from gap_analysis and unexplored_directions.
-**If REFINING:** Suggest narrowing search_space or increasing n_trials for best approach.
-**If SATURATED:** Ensemble top approaches, novel architectures, feature engineering. At least 2 bold moves from literature.
+**If REFINING:** Re-run the best approach with more trials if it was underexplored (check optimizer_efficiency). Narrow search_space around best params. Do NOT generate variants of other model families — focus on the winner.
+**If SATURATED:** Ensemble/stack top approaches, novel architectures, feature engineering. At least 2 bold moves from literature. Do NOT generate more variants of the same model family that's been tried 3+ times — those will be REJECTED by the system.
 **If STUCK:** Diagnose pipeline issues, try minimal experiment to verify baseline.
 
 ## Approach naming:

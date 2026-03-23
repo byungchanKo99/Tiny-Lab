@@ -22,8 +22,8 @@ ANALYSIS:
 Classify the current research state:
 
 - **EXPLORING** — fundamentally different approaches remain untried (check gap_analysis)
-- **REFINING** — best approach found, optimizer can narrow search space
-- **SATURATED** — current approaches exhausted, need major strategic shift
+- **REFINING** — best approach found, can deepen search or re-explore with more trials
+- **SATURATED** — current approaches exhausted, need major strategic shift (ensemble, feature engineering, new paradigm)
 - **STUCK** — many failures, something is fundamentally wrong
 
 Decision guide:
@@ -32,7 +32,9 @@ Decision guide:
 - If domain_mismatch is non-empty → STUCK (wrong approach types being used)
 - If many MARGINAL and no WIN → SATURATED (marginal improvements, need paradigm shift)
 - If last 2+ cycles were EXPLORING/REFINING → escalate to SATURATED
-- If optimizer_efficiency shows underexplored approaches → consider REFINING with meta_actions to increase time_budget
+- If optimizer_efficiency shows underexplored approaches → REFINING with meta_actions to increase time_budget
+- If best approach had few trials (underexplored) while other approaches had more → REFINING to re-run best with more trials
+- If many experiments since best AND all recent variants are of the SAME model family → SATURATED (stuck in local optimum, need fundamentally different direction — not more variants of the same model)
 
 IMPORTANT: Focus on APPROACHES, not parameter values. The optimizer handles parameters.
 
