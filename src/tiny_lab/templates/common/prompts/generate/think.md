@@ -76,7 +76,28 @@ Based on your reasoning:
 - If REFINING: re-run best approach with more trials, narrow search_space. Do NOT diversify.
 - If SATURATED: ensemble/stack top approaches, feature engineering, or completely different model class. At least 2 bold moves.
 
-Approach naming: must match a key in `project.yaml` `approaches:` (if defined) or `search_space:`.
+## Approach naming — CRITICAL
+
+When you create a new approach, you MUST register it in `project.yaml`:
+
+1. Add to `approaches:` section with the CORRECT `model` value matching the experiment script
+2. Add to `search_space:` section with parameter definitions
+3. The approach key can be any descriptive name (e.g., `bilstm_focused`)
+4. The `model` field MUST match what `train.py --model <value>` actually accepts
+
+**The `model` field is what gets injected as `--model`.** NOT the approach key name.
+
+Example — if train.py accepts `--model bilstm`:
+
+    approaches:
+      bilstm_focused:              # approach key (used in hypothesis queue)
+        model: bilstm              # MUST match train.py's --model value
+        description: "BiLSTM focused search"
+    search_space:
+      bilstm_focused:              # same key as approaches
+        hidden_size: type=int, low=128, high=512
+
+**WRONG**: approach key `lstm_attn` with `model: seq_attn` but hypothesis queue has `approach: lstm_attn` — confusing. **Use the SAME name** as the model when possible. Only use a different approach key when multiple strategies share the same model.
 
 Each hypothesis MUST have: id (H-next), status (pending), approach, description, reasoning.
 

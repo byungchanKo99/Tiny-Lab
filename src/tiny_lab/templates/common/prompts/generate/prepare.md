@@ -48,9 +48,13 @@ For each newly added hypothesis:
 
 ### 2e. Smoke test
 
-- Run the experiment script with the new approach and default params to verify it works:
+- Look up the **actual model value** for this approach:
+  - If `approaches.{approach}.model` exists in project.yaml → use that value
+  - Otherwise → use the approach name directly
+- Run the experiment script with the **model value** (NOT the approach key name):
   ```bash
-  python train.py --model {approach_name}
+  # Example: approach key = "lstm_attn", model = "seq_attn"
+  python train.py --model seq_attn    # ← use model value, NOT approach key
   ```
 - If it fails → diagnose and fix before continuing
 - If it prints valid JSON with the metric → confirmed working
