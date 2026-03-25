@@ -1,5 +1,5 @@
 name: generate
-description: "Hypothesis generation pipeline — each step runs as a separate LLM call"
+description: "Hypothesis generation pipeline — research, think, prepare, summarize"
 
 steps:
   - id: research
@@ -8,36 +8,23 @@ steps:
     tools: [WebSearch, WebFetch, Read]
     output_schema: schemas/step_research.json
 
-  - id: analyze
-    description: "Read ledger, queue, project and analyze results"
-    prompt_template: prompts/generate/analyze.md
-    tools: [Read, Bash]
+  - id: think
+    description: "Analyze results, reason deeply, generate hypotheses (merged analyze+diagnose+hypotheses)"
+    prompt_template: prompts/generate/think.md
+    tools: [Read, Write, Edit, Bash]
     requires: [research]
-    output_schema: schemas/step_analyze.json
-
-  - id: diagnose
-    description: "Classify research state (EXPLORING/REFINING/SATURATED/STUCK)"
-    prompt_template: prompts/generate/diagnose.md
-    requires: [analyze]
-    output_schema: schemas/step_diagnose.json
-
-  - id: hypotheses
-    description: "Generate approach-based hypotheses"
-    prompt_template: prompts/generate/hypotheses.md
-    tools: [Read, Write, Edit]
-    requires: [diagnose, analyze]
-    output_schema: schemas/step_hypotheses.json
+    output_schema: schemas/step_think.json
 
   - id: prepare
     description: "Ensure hypotheses are executable — install deps, add code, add flags, adjust optimizer"
     prompt_template: prompts/generate/prepare.md
     tools: [Read, Write, Edit, Bash]
-    requires: [hypotheses, diagnose, analyze]
+    requires: [think]
     output_schema: schemas/step_prepare.json
 
   - id: summary
     description: "Write generation summary"
     prompt_template: prompts/generate/summary.md
     tools: [Read, Write]
-    requires: [prepare, hypotheses, diagnose]
+    requires: [prepare, think]
     output_schema: schemas/generate_summary.json

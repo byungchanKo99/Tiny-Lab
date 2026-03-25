@@ -101,9 +101,9 @@ Key files (in research/):
     sub.add_parser(
         "generate",
         help="Manually trigger AI hypothesis generation (normally automatic in loop)",
-        description="Runs the generate pipeline (research → analyze → diagnose → hypotheses → summary) "
-                    "to create 3-5 new approach-based hypotheses. Diagnoses research state "
-                    "(EXPLORING/REFINING/SATURATED/STUCK) and acts accordingly. "
+        description="Runs the generate pipeline (research → think → prepare → summary) "
+                    "to create 3-5 new approach-based hypotheses. Analyzes results, reasons deeply, "
+                    "and generates hypotheses in a single step. "
                     "Useful for manual intervention without restarting the loop. "
                     "Output: number of new hypotheses added to queue.",
     )

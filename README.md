@@ -16,7 +16,7 @@ Deterministic AI-driven research loop. Define approaches, set a metric, and let 
 │                     EVALUATE → RECORD → back to CHECK_QUEUE                │
 │                                                                            │
 │  Queue empty? → GENERATE pipeline                                          │
-│    research → analyze → diagnose → hypotheses → summary                    │
+│    research → think → prepare → summary                                    │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 

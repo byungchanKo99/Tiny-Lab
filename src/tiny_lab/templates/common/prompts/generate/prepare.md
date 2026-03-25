@@ -1,7 +1,7 @@
 You are preparing the environment so that newly generated hypotheses can actually execute.
 
-HYPOTHESES ADDED: {hypotheses_hypotheses_added}
-CHANGES MADE: {hypotheses_changes_made}
+HYPOTHESES ADDED: {think_hypotheses_added}
+CHANGES MADE: {think_changes_made}
 
 Your job: make sure every new hypothesis will run successfully. Do NOT skip any check.
 
@@ -57,10 +57,10 @@ For each newly added hypothesis:
 
 ### 2f. Adjust optimize config (if meta-actions recommended)
 
-META-ACTIONS: {diagnose_meta_actions}
-OPTIMIZER EFFICIENCY: {analyze_optimizer_efficiency}
+META-ACTIONS: {think_meta_actions}
+OPTIMIZER EFFICIENCY: {think_optimizer_efficiency}
 
-If the diagnose step recommended meta-actions (e.g., increase time_budget):
+If the think step recommended meta-actions (e.g., increase time_budget):
 
 - Read the current `optimize` section in `research/project.yaml`
 - Apply the recommended changes (e.g., `time_budget: 600`)

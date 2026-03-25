@@ -549,7 +549,7 @@ class TestStderrLogging:
         with patch("tiny_lab.pipeline.log"), patch("tiny_lab.generate.log"):
             generate_hypotheses(project, project_dir, provider)
 
-        # Pipeline has 5 steps but should stop after first failure
+        # Pipeline has 4 steps but should stop after first failure
         assert call_count == 1
 
     def test_build_code_logs_stderr_on_failure(self):

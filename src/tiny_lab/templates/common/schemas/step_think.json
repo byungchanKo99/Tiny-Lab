@@ -1,0 +1,68 @@
+{
+  "type": "object",
+  "required": [
+    "state",
+    "reasoning",
+    "best_so_far",
+    "hypotheses_added",
+    "changes_made"
+  ],
+  "properties": {
+    "state": {
+      "type": "string",
+      "enum": ["EXPLORING", "REFINING", "SATURATED", "STUCK"]
+    },
+    "reasoning": {
+      "type": "string",
+      "description": "Full reasoning: what's working, what's not, why these hypotheses"
+    },
+    "best_so_far": {
+      "type": "object",
+      "required": ["experiment_id", "metric_value", "config"],
+      "properties": {
+        "experiment_id": { "type": "string" },
+        "metric_value": { "type": "number" },
+        "config": { "type": "string" }
+      }
+    },
+    "patterns": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Key patterns observed from experiment results"
+    },
+    "failure_patterns": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "What didn't work and why"
+    },
+    "optimizer_efficiency": {
+      "type": "object",
+      "properties": {
+        "underexplored": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "time_budget_sufficient": { "type": "boolean" },
+        "recommended_time_budget": { "type": ["integer", "null"] }
+      }
+    },
+    "hypotheses_added": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "IDs of hypotheses added to queue"
+    },
+    "changes_made": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Changes to project.yaml or code"
+    },
+    "meta_actions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Recommended optimize config changes"
+    },
+    "experiments_analyzed": {
+      "type": "integer"
+    }
+  }
+}

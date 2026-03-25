@@ -489,29 +489,22 @@ def _archive_generate_summary(project_dir: Path, valid_count: int, opt_changes: 
     else:
         # Fallback: read pipeline step outputs for partial summary
         research_dir = project_dir / "research"
-        diagnose_path = research_dir / ".step_diagnose.json"
-        hypotheses_path = research_dir / ".step_hypotheses.json"
+        think_path = research_dir / ".step_think.json"
 
-        if diagnose_path.exists():
+        if think_path.exists():
             try:
-                diagnose = json.loads(diagnose_path.read_text())
-                entry["state"] = diagnose.get("state", "UNKNOWN")
-                entry["reasoning"] = diagnose.get("reasoning", "(from diagnose step)")
-                entry["best_so_far"] = diagnose.get("best_so_far", {})
-            except json.JSONDecodeError:
-                pass
-
-        if hypotheses_path.exists():
-            try:
-                hyp = json.loads(hypotheses_path.read_text())
-                entry.setdefault("hypotheses_added", hyp.get("hypotheses_added", []))
-                entry.setdefault("changes_made", hyp.get("changes_made", []))
+                think = json.loads(think_path.read_text())
+                entry["state"] = think.get("state", "UNKNOWN")
+                entry["reasoning"] = think.get("reasoning", "(from think step)")
+                entry["best_so_far"] = think.get("best_so_far", {})
+                entry.setdefault("hypotheses_added", think.get("hypotheses_added", []))
+                entry.setdefault("changes_made", think.get("changes_made", []))
             except json.JSONDecodeError:
                 pass
 
         if "state" not in entry:
             entry["state"] = "UNKNOWN"
-            entry["reasoning"] = "(pipeline did not produce summary or diagnose output)"
+            entry["reasoning"] = "(pipeline did not produce summary or think output)"
 
     with history_path.open("a") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")

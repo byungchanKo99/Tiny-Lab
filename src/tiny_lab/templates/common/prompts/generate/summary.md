@@ -1,9 +1,9 @@
 You are writing a generation summary for a research loop.
 
-DIAGNOSIS: {diagnose_state} — {diagnose_reasoning}
-BEST SO FAR: {diagnose_best_so_far}
-HYPOTHESES ADDED: {hypotheses_hypotheses_added}
-CHANGES MADE: {hypotheses_changes_made}
+DIAGNOSIS: {think_state} — {think_reasoning}
+BEST SO FAR: {think_best_so_far}
+HYPOTHESES ADDED: {think_hypotheses_added}
+CHANGES MADE: {think_changes_made}
 
 PREPARATION RESULTS:
 
@@ -15,10 +15,10 @@ PREPARATION RESULTS:
 
 Write a JSON summary to research/.step_summary.json with:
 
-- state: "{diagnose_state}"
+- state: "{think_state}"
 - reasoning: 2-3 sentence explanation of your diagnosis and choices
-- best_so_far: {diagnose_best_so_far}
-- hypotheses_added: {hypotheses_hypotheses_added}
+- best_so_far: {think_best_so_far}
+- hypotheses_added: {think_hypotheses_added}
 - changes_made: combined list of hypothesis changes + preparation changes
 - experiments_analyzed: number of experiments you reviewed
 - references: techniques or papers that inspired these hypotheses (optional)
