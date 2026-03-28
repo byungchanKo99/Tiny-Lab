@@ -76,6 +76,42 @@ def main() -> None:
         parser.print_help()
 
 
+def _register_hooks(project_dir: Path) -> None:
+    """Register state-gate and state-advance hooks in .claude/settings.json."""
+    import json
+
+    settings_path = project_dir / ".claude" / "settings.json"
+    settings: dict = {}
+    if settings_path.exists():
+        try:
+            settings = json.loads(settings_path.read_text())
+        except json.JSONDecodeError:
+            settings = {}
+
+    hooks = settings.setdefault("hooks", {})
+
+    # PreToolUse: state-gate blocks disallowed operations
+    pre = hooks.setdefault("PreToolUse", [])
+    gate_entry = {
+        "matcher": "Write|Edit|Bash",
+        "command": ".claude/hooks/state-gate.sh",
+    }
+    if not any(e.get("command") == gate_entry["command"] for e in pre):
+        pre.append(gate_entry)
+
+    # PostToolUse: state-advance detects artifacts and transitions
+    post = hooks.setdefault("PostToolUse", [])
+    advance_entry = {
+        "matcher": "Write|Edit",
+        "command": ".claude/hooks/state-advance.sh",
+    }
+    if not any(e.get("command") == advance_entry["command"] for e in post):
+        post.append(advance_entry)
+
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+
+
 def _cmd_init(project_dir: Path, preset: str) -> None:
     """Initialize research project with a workflow preset."""
     from .paths import research_dir, workflow_path, shared_dir
@@ -104,6 +140,9 @@ def _cmd_init(project_dir: Path, preset: str) -> None:
         dst = hooks_dst / hook.name
         shutil.copy2(hook, dst)
         dst.chmod(0o755)
+
+    # Register hooks in .claude/settings.json
+    _register_hooks(project_dir)
     print(f"Hooks installed: {hooks_dst}")
 
     # Copy prompt templates
@@ -112,6 +151,13 @@ def _cmd_init(project_dir: Path, preset: str) -> None:
     if prompts_src.exists():
         shutil.copytree(prompts_src, prompts_dst, dirs_exist_ok=True)
         print(f"Prompts installed: {prompts_dst}")
+
+    # Copy CLAUDE.md
+    claude_md_src = Path(__file__).parent / "templates" / "CLAUDE.md"
+    claude_md_dst = project_dir / "CLAUDE.md"
+    if claude_md_src.exists() and not claude_md_dst.exists():
+        shutil.copy2(claude_md_src, claude_md_dst)
+        print(f"CLAUDE.md installed")
 
 
 def _cmd_run(project_dir: Path, idea: str | None) -> None:
