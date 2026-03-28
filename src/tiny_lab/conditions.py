@@ -28,7 +28,7 @@ def resolve_condition(
     else:
         raise StateError("Condition must have 'check' or 'source'+'field'")
 
-    value_str = str(value)
+    value_str = str(value).lower() if isinstance(value, bool) else str(value)
     if value_str in next_map:
         return next_map[value_str]
     if "default" in next_map:

@@ -546,7 +546,16 @@ class Engine:
 
         # Validate required fields
         if spec.completion.required_fields:
-            data = yaml.safe_load(Path(matches[0]).read_text())
+            try:
+                data = yaml.safe_load(Path(matches[0]).read_text())
+            except yaml.YAMLError:
+                # AI-generated YAML may have syntax errors — advance anyway
+                # since the artifact file exists (content will be consumed by next state)
+                log(f"ENGINE: _try_advance — YAML parse warning in {matches[0]}, advancing anyway")
+                if isinstance(spec.next, str):
+                    set_state(self.project_dir, spec.next)
+                    log(f"ENGINE: advanced {ls.state} → {spec.next} (with YAML warning)")
+                return
             if not isinstance(data, dict):
                 return
             missing = [f for f in spec.completion.required_fields if f not in data]

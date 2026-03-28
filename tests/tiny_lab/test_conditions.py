@@ -68,7 +68,7 @@ class TestBuiltinCheck:
         }
         (tmp_path / "research" / "iter_1" / "research_plan.yaml").write_text(yaml.dump(plan))
         cond = ConditionSpec(check="has_pending_phases")
-        result = resolve_condition(cond, {"True": "CODE", "False": "REFLECT"}, tmp_path, 1)
+        result = resolve_condition(cond, {"true": "CODE", "false": "REFLECT"}, tmp_path, 1)
         assert result == "CODE"
 
     def test_has_pending_phases_false(self, tmp_path):
@@ -80,7 +80,7 @@ class TestBuiltinCheck:
         }
         (tmp_path / "research" / "iter_1" / "research_plan.yaml").write_text(yaml.dump(plan))
         cond = ConditionSpec(check="has_pending_phases")
-        result = resolve_condition(cond, {"True": "CODE", "False": "REFLECT"}, tmp_path, 1)
+        result = resolve_condition(cond, {"true": "CODE", "false": "REFLECT"}, tmp_path, 1)
         assert result == "REFLECT"
 
     def test_unknown_check(self, tmp_path):
