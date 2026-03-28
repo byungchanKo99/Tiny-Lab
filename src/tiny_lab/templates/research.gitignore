@@ -1,0 +1,12 @@
+# tiny-lab runtime files
+.state.json
+.loop-lock
+.events.jsonl
+.intervention.yaml
+.manual_wait.yaml
+.user_idea.txt
+
+# Iteration hidden artifacts (generated, not source)
+iter_*/.domain_research.yaml
+iter_*/.data_analysis.yaml
+iter_*/.idea_refined.yaml

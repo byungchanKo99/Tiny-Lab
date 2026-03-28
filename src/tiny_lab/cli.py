@@ -157,7 +157,14 @@ def _cmd_init(project_dir: Path, preset: str) -> None:
     claude_md_dst = project_dir / "CLAUDE.md"
     if claude_md_src.exists() and not claude_md_dst.exists():
         shutil.copy2(claude_md_src, claude_md_dst)
-        print(f"CLAUDE.md installed")
+        print("CLAUDE.md installed")
+
+    # Copy .gitignore for research/
+    gitignore_src = Path(__file__).parent / "templates" / "research.gitignore"
+    gitignore_dst = rd / ".gitignore"
+    if gitignore_src.exists() and not gitignore_dst.exists():
+        shutil.copy2(gitignore_src, gitignore_dst)
+        print("research/.gitignore installed")
 
 
 def _cmd_run(project_dir: Path, idea: str | None) -> None:

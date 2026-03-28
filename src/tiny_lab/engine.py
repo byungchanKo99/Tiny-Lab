@@ -295,7 +295,15 @@ class Engine:
             self._run_phase_optimize(phase, ls)
         elif phase_type == "manual":
             log(f"ENGINE: phase {phase_id} is manual — waiting for intervention")
-            # Will be handled by checkpoint
+            # Write a marker so the intervention knows what phase is waiting
+            import yaml as _yaml
+            marker = {"phase_id": phase_id, "phase_name": phase.get("name", ""), "waiting_for": "manual input"}
+            (intervention_path(self.project_dir).parent / ".manual_wait.yaml").write_text(
+                _yaml.dump(marker, default_flow_style=False)
+            )
+            # Transition to CHECKPOINT to wait for intervention
+            set_state(self.project_dir, "CHECKPOINT")
+            return  # Don't continue to normal PHASE_RUN transition
         else:
             self._run_phase_script(phase, ls)
 
@@ -484,7 +492,9 @@ class Engine:
                 phase = next((p for p in plan["phases"] if p["id"] == ls.current_phase_id), None)
                 if phase:
                     ctx["current_phase"] = phase
-                    ctx["current_phase_name"] = phase.get("name", "")
+                    name = phase.get("name", "")
+                    ctx["current_phase_name"] = name
+                    ctx["current_phase_name_slug"] = name.lower().replace(" ", "_").replace("-", "_")
                     ctx["current_phase_type"] = phase.get("type", "script")
             except Exception:
                 pass
