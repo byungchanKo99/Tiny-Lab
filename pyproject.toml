@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tiny-lab"
-version = "4.2.1"
-description = "Deterministic AI-driven research loop for experiments"
+version = "5.0.0"
+description = "Plan-driven AI research loop"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"

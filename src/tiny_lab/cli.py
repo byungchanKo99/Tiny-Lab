@@ -1,672 +1,261 @@
-"""CLI entry point for tiny-lab."""
+"""tiny-lab v5 CLI — plan-driven phase executor."""
 from __future__ import annotations
 
 import argparse
-import json
-import os
 import shutil
-import signal
+import sys
 from pathlib import Path
-from typing import Any
 
-import yaml
+from .logging import log
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="tiny-lab",
-        description="Deterministic AI-driven research loop",
-        epilog="""\
-Lifecycle:
-  tiny-lab init                          # scaffold project (once)
-  tiny-lab discover "optimize accuracy"  # AI-guided setup → project.yaml + hypotheses
-  CYCLE_SLEEP=1 tiny-lab run &           # start infinite loop in background
-  tiny-lab status                        # confirm RUNNING
-  tiny-lab board                         # check WIN/LOSS results
-  tiny-lab stop                          # graceful shutdown when done
-
-The loop is an INFINITE state machine:
-  CHECK_QUEUE → SELECT → BUILD → OPTIMIZE → EVALUATE → RECORD → CHECK_QUEUE
-  When queue empties → GENERATE (AI creates new hypotheses) → CHECK_QUEUE
-  OPTIMIZE runs inner loop (grid/random/custom) if search_space defined, else single RUN
-
-Environment variables:
-  CYCLE_SLEEP     Seconds between experiment cycles (default: 30, recommend: 1)
-  TINYLAB_PROVIDER  Force provider: "claude" or "codex" (default: auto-detect)
-  CLAUDE_MAX_TURNS  Max turns for Claude provider (default: 20)
-
-Key files (in research/):
-  project.yaml          Experiment config: baseline, metric, levers, rules
-  hypothesis_queue.yaml Hypothesis queue (pending/running/done/skipped)
-  ledger.jsonl          Experiment results (append-only, DO NOT modify)
-  loop.log              Loop execution log
-  .loop-lock            PID lock file (use 'tiny-lab stop', not kill)
-""",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Plan-driven AI research loop",
     )
-    parser.add_argument("--project-dir", default=".", help="Project root directory (default: cwd)")
     sub = parser.add_subparsers(dest="command")
 
-    init_parser = sub.add_parser(
-        "init",
-        help="Scaffold project: create research/ dir, config templates, agent instructions",
-        description="Creates research/ directory with project.yaml, hypothesis_queue.yaml, "
-                    "questions.yaml, and provider-specific agent configs. Auto-detects "
-                    "Claude Code or Codex CLI. Skips files that already exist.",
-    )
-    init_parser.add_argument("--global", dest="global_install", action="store_true",
-                             help="Also install /research slash command to ~/.claude/ (Claude only)")
-    init_parser.add_argument("--update", action="store_true",
-                             help="Overwrite existing template files (backs up to .bak first)")
+    # init
+    init_p = sub.add_parser("init", help="Initialize research project")
+    init_p.add_argument("--preset", default="ml-experiment",
+                        choices=["ml-experiment", "review-paper", "novel-method",
+                                 "data-analysis", "custom"],
+                        help="Workflow preset (default: ml-experiment)")
 
-    run_parser = sub.add_parser(
-        "run",
-        help="Start the experiment loop (INFINITE — run in background with &)",
-        description="Starts the research loop state machine. This command NEVER exits on its own — "
-                    "it runs experiments indefinitely until stopped via 'tiny-lab stop' or circuit "
-                    "breaker (5 INVALID in last 20). MUST be run in background:\n\n"
-                    "  CYCLE_SLEEP=1 tiny-lab run > research/tiny_lab_run.out 2>&1 &\n\n"
-                    "The loop: picks hypothesis → builds command → optimizes (if search_space) "
-                    "→ evaluates → records to ledger.jsonl → repeats. When queue empties, AI "
-                    "generates new hypotheses via pipeline (GENERATE phase).",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    run_parser.add_argument("--until-idle", action="store_true",
-        help="Stop the loop when the initial queue is exhausted instead of generating new hypotheses. "
-             "Use for finite comparisons (e.g. 'compare 5 models').")
-    run_parser.add_argument("--on-event", metavar="CMD",
-        help="Shell command to execute on loop events. "
-             "Receives TINYLAB_EVENT and TINYLAB_EVENT_DATA env vars. "
-             "Example: --on-event 'tiny-lab status --json >> /tmp/lab.log'")
+    # run
+    run_p = sub.add_parser("run", help="Start the research loop")
+    run_p.add_argument("idea", nargs="?", help="Research idea (natural language)")
 
-    status_parser = sub.add_parser(
-        "status",
-        help="Show loop state, queue counts, and last 5 experiment results",
-        description="Outputs: RUNNING/STOPPED, current state (select/run/evaluate/generate), "
-                    "queue breakdown (pending/done/skipped counts), and last 5 ledger entries "
-                    "with verdict (WIN/LOSS/INVALID) and metric values. Use this to confirm "
-                    "the loop is alive after starting, and to monitor progress.",
-    )
-    status_parser.add_argument("--json", dest="as_json", action="store_true",
-                                help="Output structured JSON with action_needed field")
+    # status
+    sub.add_parser("status", help="Show current state")
 
-    sub.add_parser(
-        "stop",
-        help="Send SIGTERM to running loop (graceful shutdown after current experiment)",
-        description="Reads PID from research/.loop-lock and sends SIGTERM. The loop finishes "
-                    "its current experiment, records the result, then exits cleanly. "
-                    "If the process is already dead, removes the stale lock file.",
-    )
+    # stop
+    sub.add_parser("stop", help="Stop the running loop")
 
-    sub.add_parser(
-        "generate",
-        help="Manually trigger AI hypothesis generation (normally automatic in loop)",
-        description="Runs the generate pipeline (research → think → prepare → summary) "
-                    "to create 3-5 new approach-based hypotheses. Analyzes results, reasons deeply, "
-                    "and generates hypotheses in a single step. "
-                    "Useful for manual intervention without restarting the loop. "
-                    "Output: number of new hypotheses added to queue.",
-    )
+    # resume
+    resume_p = sub.add_parser("resume", help="Resume from last state")
+    resume_p.add_argument("--add-phase", help="Add a phase before resuming")
+    resume_p.add_argument("--from", dest="from_phase", help="Resume from specific phase")
 
-    board_parser = sub.add_parser(
-        "board",
-        help="Show experiment dashboard: best result, WIN/LOSS counts, metric trends",
-        description="Displays project name, metric, baseline, best experiment found, "
-                    "result class counts (WIN/LOSS/INVALID), queue status, last 10 experiments "
-                    "with delta%%, and generation history (AI reasoning for each GENERATE cycle). "
-                    "This is the primary way to understand research progress at a glance.",
-    )
-    board_parser.add_argument("--export", choices=["csv", "json"],
-                              help="Export ledger as CSV or JSON (approach, metric, delta%%, best_params)")
-    board_parser.add_argument("--plot", action="store_true",
-                              help="Add ASCII sparklines: metric trend over time + per-approach WIN/LOSS bars")
-    board_parser.add_argument("--html", metavar="FILE", nargs="?", const="research/report.html",
-                              help="Generate self-contained HTML report with Chart.js visualizations")
-    board_parser.add_argument("--live", action="store_true",
-                              help="Start live dashboard on localhost (auto-refreshing HTML, default port 8505)")
-    board_parser.add_argument("--port", type=int, default=8505,
-                              help="Port for live dashboard (default: 8505)")
-    board_parser.add_argument("--refresh", type=int, default=5,
-                              help="Auto-refresh interval in seconds for live dashboard (default: 5)")
-    board_parser.add_argument("-o", "--output", help="Output file path (for --export)")
+    # fork
+    fork_p = sub.add_parser("fork", help="Fork to new iteration")
+    fork_p.add_argument("--enter", help="State to enter (e.g., PLAN, IDEA_REFINE)")
+    fork_p.add_argument("--idea", help="New idea for the fork")
+    fork_p.add_argument("source_iter", nargs="?", type=int, help="Source iteration to fork from")
 
-    discover_parser = sub.add_parser(
-        "discover",
-        help="AI-guided interactive setup: analyze data → propose metrics/levers → write configs",
-        description="Starts an interactive AI session that: (1) scans for data/script files, "
-                    "(2) analyzes columns to find metric and lever candidates, (3) asks user to "
-                    "confirm choices, (4) writes project.yaml + hypothesis_queue.yaml + questions.yaml, "
-                    "(5) verifies baseline command works. Works with any provider (Claude/Codex).",
-    )
-    discover_parser.add_argument("intent", nargs="*",
-                                 help="Research intent in natural language (e.g. 'optimize hotel cancellation prediction')")
+    # board
+    board_p = sub.add_parser("board", help="Show results dashboard")
+    board_p.add_argument("--iter", type=int, help="Specific iteration")
+
+    # intervene
+    intervene_p = sub.add_parser("intervene", help="Send intervention")
+    intervene_p.add_argument("action", choices=["approve", "skip", "modify", "stop", "add-phase"])
+    intervene_p.add_argument("args", nargs="*")
 
     args = parser.parse_args()
-    project_dir = Path(args.project_dir).resolve()
-
-    if args.command is None:
-        parser.print_help()
-        return
+    project_dir = Path.cwd()
 
     if args.command == "init":
-        cmd_init(project_dir, global_install=args.global_install, update=args.update)
-    elif args.command == "discover":
-        cmd_discover(project_dir, " ".join(args.intent) if args.intent else "")
-    elif args.command == "board":
-        cmd_board(project_dir, args)
+        _cmd_init(project_dir, args.preset)
     elif args.command == "run":
-        cmd_run(project_dir, on_event_cmd=getattr(args, "on_event", None),
-                until_idle=getattr(args, "until_idle", False))
+        _cmd_run(project_dir, args.idea)
     elif args.command == "status":
-        cmd_status(project_dir, as_json=getattr(args, "as_json", False))
+        _cmd_status(project_dir)
+    elif args.command == "stop":
+        _cmd_stop(project_dir)
+    elif args.command == "resume":
+        _cmd_resume(project_dir, args.add_phase, args.from_phase)
+    elif args.command == "fork":
+        _cmd_fork(project_dir, args.enter, args.idea, args.source_iter)
+    elif args.command == "board":
+        _cmd_board(project_dir, args.iter)
+    elif args.command == "intervene":
+        _cmd_intervene(project_dir, args.action, args.args)
     else:
-        commands = {
-            "stop": cmd_stop,
-            "generate": cmd_generate,
-        }
-        commands[args.command](project_dir)
+        parser.print_help()
 
 
-def _templates_dir() -> Path:
-    """Get the templates directory bundled with the package."""
-    return Path(__file__).parent / "templates"
+def _cmd_init(project_dir: Path, preset: str) -> None:
+    """Initialize research project with a workflow preset."""
+    from .paths import research_dir, workflow_path, shared_dir
+
+    rd = research_dir(project_dir)
+    rd.mkdir(parents=True, exist_ok=True)
+    shared_dir(project_dir).mkdir(parents=True, exist_ok=True)
+
+    # Copy preset to .workflow.yaml
+    preset_file = Path(__file__).parent / "presets" / f"{preset}.yaml"
+    if not preset_file.exists():
+        print(f"Preset not found: {preset}")
+        sys.exit(1)
+
+    wf_path = workflow_path(project_dir)
+    shutil.copy2(preset_file, wf_path)
+    print(f"Initialized with preset: {preset}")
+    print(f"Workflow: {wf_path}")
+    print(f"Edit research/.workflow.yaml to customize.")
+
+    # Copy hooks
+    hooks_src = Path(__file__).parent / "hooks"
+    hooks_dst = project_dir / ".claude" / "hooks"
+    hooks_dst.mkdir(parents=True, exist_ok=True)
+    for hook in hooks_src.glob("*.sh"):
+        dst = hooks_dst / hook.name
+        shutil.copy2(hook, dst)
+        dst.chmod(0o755)
+    print(f"Hooks installed: {hooks_dst}")
+
+    # Copy prompt templates
+    prompts_src = Path(__file__).parent / "prompts"
+    prompts_dst = project_dir / "prompts"
+    if prompts_src.exists():
+        shutil.copytree(prompts_src, prompts_dst, dirs_exist_ok=True)
+        print(f"Prompts installed: {prompts_dst}")
 
 
-def cmd_init(project_dir: Path, *, global_install: bool = False, update: bool = False) -> None:
-    """Initialize a new experiment project."""
-    from .providers import detect_provider, get_provider
-
-    templates = _templates_dir()
-    provider_name = detect_provider()
-    provider = get_provider(project_dir, provider_name)
-
-    created = []
-    skipped = []
-    updated = []
-
-    for src_rel, dst_rel in provider.get_template_files():
-        src = templates / src_rel
-        dst = project_dir / dst_rel
-
-        if dst.exists():
-            if update:
-                backup = dst.with_suffix(dst.suffix + ".bak")
-                shutil.copy2(dst, backup)
-                shutil.copy2(src, dst)
-                if dst_rel.endswith(".sh"):
-                    dst.chmod(dst.stat().st_mode | 0o111)
-                updated.append(dst_rel)
-            else:
-                skipped.append(dst_rel)
-            continue
-
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-        if dst_rel.endswith(".sh"):
-            dst.chmod(dst.stat().st_mode | 0o111)
-        created.append(dst_rel)
-
-    if created:
-        print("Created:")
-        for f in created:
-            print(f"  {f}")
-    if updated:
-        print("Updated (backup → .bak):")
-        for f in updated:
-            print(f"  {f}")
-    if skipped:
-        print("Skipped (already exists):")
-        for f in skipped:
-            print(f"  {f}")
-
-    from .paths import ledger_path, project_yaml_path
-    if not ledger_path(project_dir).exists():
-        ledger_path(project_dir).touch()
-        print("  research/ledger.jsonl (empty)")
-
-    # Write detected provider into project.yaml
-    project_yaml = project_yaml_path(project_dir)
-    if project_yaml.exists():
-        content = project_yaml.read_text()
-        content = content.replace("provider: claude", f"provider: {provider_name}")
-        project_yaml.write_text(content)
-
-    # --global: also install /research command to ~/.claude/ for all projects
-    if global_install and provider_name == "claude":
-        global_dst = Path.home() / ".claude" / "commands" / "research.md"
-        global_src = templates / "claude" / "commands" / "research.md"
-        global_dst.parent.mkdir(parents=True, exist_ok=True)
-        if not global_dst.exists() or global_dst.read_text() != global_src.read_text():
-            shutil.copy2(global_src, global_dst)
-            print(f"  {global_dst} (global /research command)")
-
-    print(f"\nProvider: {provider_name}")
-    if provider_name == "claude":
-        print("Start with: /research <what you want to research>")
-        print("Or: tiny-lab discover <what you want to research>")
-    else:
-        print("Start with: tiny-lab discover <what you want to research>")
-
-    print("\n" + "=" * 60)
-    print("AGENT RULES:")
-    print("1. NEVER run `tiny-lab stop` unless the user explicitly asks.")
-    print("2. Always run in background: tiny-lab run > research/tiny_lab_run.out 2>&1 &")
-    print("3. For finite comparisons: tiny-lab run --until-idle")
-    print("4. The loop auto-generates new hypotheses. Do NOT stop it early.")
-    print("=" * 60)
-
-
-
-def cmd_run(project_dir: Path, *, on_event_cmd: str | None = None, until_idle: bool = False) -> None:
+def _cmd_run(project_dir: Path, idea: str | None) -> None:
     """Start the research loop."""
-    from .loop import ResearchLoop
-    loop = ResearchLoop(project_dir, on_event_cmd=on_event_cmd, until_idle=until_idle)
-    raise SystemExit(loop.run())
+    from .engine import Engine
+    from .paths import workflow_path
+
+    if not workflow_path(project_dir).exists():
+        print("Not initialized. Run 'tiny-lab init' first.")
+        sys.exit(1)
+
+    if idea:
+        # Store idea for IDEA_REFINE to pick up
+        idea_file = project_dir / "research" / ".user_idea.txt"
+        idea_file.write_text(idea)
+        log(f"User idea: {idea}")
+
+    engine = Engine(project_dir)
+    engine.run()
 
 
-def _build_status_data(project_dir: Path) -> dict[str, Any]:
-    """Build structured status data."""
-    from .dashboard import build_status_data
-    return build_status_data(project_dir)
+def _cmd_status(project_dir: Path) -> None:
+    """Show current state."""
+    from .state import load_state
+
+    ls = load_state(project_dir)
+    print(f"Iteration: {ls.current_iteration}")
+    print(f"State: {ls.state}")
+    if ls.current_phase_id:
+        print(f"Phase: {ls.current_phase_id}")
+    print(f"Resumable: {ls.resumable}")
+    if ls.consecutive_failures > 0:
+        print(f"Consecutive failures: {ls.consecutive_failures}")
 
 
-def _format_status(data: dict[str, Any]) -> None:
-    """Print human-readable status from data dict."""
-    pid = data.get("pid")
-    print(f"Loop: {data['loop']}" + (f" (pid={pid})" if pid else ""))
-    if data["loop"] == "RUNNING":
-        print("Reminder: Do NOT run `tiny-lab stop` unless the user explicitly asks.")
+def _cmd_stop(project_dir: Path) -> None:
+    """Stop by writing intervention."""
+    import yaml
+    from .paths import intervention_path
 
-    if data.get("state"):
-        print(f"State: {data['state']} (updated: {data.get('updated_at', '?')})")
-    if data.get("current_hypothesis"):
-        print(f"Current hypothesis: {data['current_hypothesis']}")
-
-    queue = data.get("queue", {})
-    parts = [f"{k}: {v}" for k, v in sorted(queue.items())]
-    print(f"Queue: {', '.join(parts) if parts else 'empty'}")
-
-    recent = data.get("recent_experiments", [])
-    if recent:
-        print("\nRecent experiments:")
-        for row in recent:
-            print(f"  {row['id']}: {row.get('class', '?')} | {row.get('metric', {})} | {row.get('description', '')}")
+    ipath = intervention_path(project_dir)
+    ipath.parent.mkdir(parents=True, exist_ok=True)
+    ipath.write_text(yaml.dump({"action": "stop"}))
+    print("Stop signal sent.")
 
 
-def cmd_status(project_dir: Path, *, as_json: bool = False) -> None:
-    """Show loop status."""
-    data = _build_status_data(project_dir)
-    if as_json:
-        print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
-    else:
-        _format_status(data)
+def _cmd_resume(project_dir: Path, add_phase: str | None, from_phase: str | None) -> None:
+    """Resume from last state."""
+    from .state import load_state, set_state
 
-
-def cmd_stop(project_dir: Path) -> None:
-    """Stop the running loop."""
-    from .paths import lock_path as _lock_path
-    lock_path = _lock_path(project_dir)
-    if not lock_path.exists():
-        print("No running loop found.")
-        return
-
-    try:
-        pid = int(lock_path.read_text().strip())
-        os.kill(pid, signal.SIGTERM)
-        print(f"Sent SIGTERM to pid {pid}")
-    except ValueError:
-        print("Invalid lock file")
-    except OSError as e:
-        print(f"Could not stop loop: {e}")
-        lock_path.unlink(missing_ok=True)
-        print("Removed stale lock file")
-
-
-def cmd_generate(project_dir: Path) -> None:
-    """Manually trigger hypothesis generation."""
-    from .project import load_project
-    from .generate import generate_hypotheses
-    from .queue import load_queue, pending_hypotheses
-    from .providers import get_provider
-
-    project = load_project(project_dir)
-    provider = get_provider(project_dir)
-
-    before = len(pending_hypotheses(load_queue(project_dir)))
-    generate_hypotheses(project, project_dir, provider)
-    after = len(pending_hypotheses(load_queue(project_dir)))
-
-    added = after - before
-    if added > 0:
-        print(f"Generated {added} new hypotheses.")
-    else:
-        print("No new hypotheses generated.")
-
-
-def cmd_discover(project_dir: Path, intent: str = "") -> None:
-    """Interactive research setup using AI provider.
-
-    Portable alternative to /research slash command — works with any provider.
-    Reads research.md discovery instructions and runs the AI interactively.
-    """
-    from .providers import get_provider
-
-    templates = _templates_dir()
-    research_md = templates / "claude" / "commands" / "research.md"
-
-    # Read the discovery mode instructions
-    instructions = research_md.read_text()
-
-    provider = get_provider(project_dir)
-
-    prompt = f"""You are running the /research discovery mode.
-
-USER INTENT: {intent if intent else "(user will describe interactively)"}
-
-Follow the Discovery Mode instructions below EXACTLY. Execute phases in order.
-The working directory is: {project_dir}
-
-{instructions}
-
-Start with Phase 1: SCAN. Scan the current directory and proceed through the phases."""
-
-    print(f"Starting discovery mode (provider: {provider.name})...")
-    print(f"Project directory: {project_dir}")
-    if intent:
-        print(f"Intent: {intent}")
-    print()
-
-    result = provider.run_interactive(prompt, cwd=str(project_dir))
-    raise SystemExit(result.returncode)
-
-
-def _build_board_data(project_dir: Path) -> dict[str, Any] | None:
-    """Load and compute all data needed for the experiment dashboard."""
-    from .dashboard import build_board_data
-    return build_board_data(project_dir)
-
-
-def _format_value(value: Any) -> str:
-    """Format a hypothesis value for display. Handles both str and dict (multi-lever)."""
-    if isinstance(value, dict):
-        return ", ".join(f"{k}={v}" for k, v in value.items())
-    return str(value)
-
-
-def _format_board(data: dict[str, Any]) -> None:
-    """Print the experiment dashboard from pre-computed data."""
-    metric_name = data["metric_name"]
-    direction = data["direction"]
-    baseline = data["baseline"]
-    ledger = data["ledger"]
-    best_row = data["best_row"]
-    counts = data["counts"]
-    queue_counts = data["queue_counts"]
-    gen_history = data["gen_history"]
-
-    print(f"Project: {data['project']['name']}")
-    print(f"Metric: {metric_name} (direction: {direction})")
-    baseline_cmd = data.get("baseline_command", "")
-    if baseline_cmd:
-        print(f"Baseline {metric_name}: {baseline} | {baseline_cmd}")
-    else:
-        print(f"Baseline {metric_name}: {baseline}")
-    print()
-
-    if best_row:
-        bpm = best_row.get("primary_metric", {})
-        diff = best_row.get("_diff", "")
-        print(f"Best: {best_row['id']} — {metric_name}={bpm.get(metric_name)} (delta={bpm.get('delta_pct')}%)")
-        if diff:
-            print(f"  Changes: {diff}")
-        opt = best_row.get("optimize_result")
-        if opt:
-            bp = opt.get("best_params", {})
-            print(f"  Optimizer: {opt.get('n_trials', '?')} trials in {opt.get('total_seconds', '?')}s")
-            if bp:
-                print(f"  Best hyperparameters:")
-                for k, v in bp.items():
-                    print(f"    {k}: {v}")
-    print()
-
-    print("Results: " + ", ".join(f"{k}: {v}" for k, v in sorted(counts.items())))
-    print("Queue: " + ", ".join(f"{k}: {v}" for k, v in sorted(queue_counts.items())))
-
-    # Insights
-    insights = data.get("insights", {})
-    insight_parts = []
-    if insights.get("experiments_per_hour"):
-        insight_parts.append(f"{insights['experiments_per_hour']} exp/hr")
-    if insights.get("total_elapsed_minutes"):
-        insight_parts.append(f"{insights['total_elapsed_minutes']}min elapsed")
-    if insights.get("total_optimizer_trials"):
-        insight_parts.append(f"{insights['total_optimizer_trials']} optimizer trials")
-    if insight_parts:
-        print("Speed: " + " | ".join(insight_parts))
-
-    if insights.get("experiments_since_best") is not None:
-        n = insights["experiments_since_best"]
-        trend = insights.get("recent_trend", "")
-        trend_str = f" (trend: {trend})" if trend else ""
-        if n == 0:
-            print(f"Convergence: best was the latest experiment{trend_str}")
+    ls = load_state(project_dir)
+    if ls.state == "DONE":
+        if add_phase:
+            set_state(project_dir, "PLAN", resumable=True)
+            log(f"Resuming with new phase: {add_phase}")
         else:
-            print(f"Convergence: {n} experiments since last best{trend_str}")
+            print("Loop is DONE. Use --add-phase or 'tiny-lab fork'.")
+            return
+    elif from_phase:
+        set_state(project_dir, "PHASE_SELECT", current_phase_id=None)
+        log(f"Resuming from phase {from_phase}")
 
-    if insights.get("eta_minutes"):
-        print(f"ETA: ~{insights['eta_minutes']}min for {insights['pending_count']} pending")
+    from .engine import Engine
+    engine = Engine(project_dir)
+    engine.run()
 
-    nxt = insights.get("next_hypothesis")
-    if nxt:
-        print(f"Next: {nxt['id']} — {nxt['approach']} — {nxt['description']}")
 
-    untried = insights.get("untried_approaches")
-    if untried:
-        print(f"Untried: {', '.join(untried)}")
+def _cmd_fork(project_dir: Path, enter: str | None, idea: str | None, source_iter: int | None) -> None:
+    """Fork to new iteration."""
+    from .state import load_state, set_state
+    from .paths import iter_dir
 
-    print()
+    ls = load_state(project_dir)
+    source = source_iter or ls.current_iteration
+    new_iter = source + 1
 
-    recent = ledger[-10:]
-    if recent:
-        print(f"{'ID':<10} {'Verdict':<10} {metric_name:<12} {'Delta%':<10} {'Approach':<25} {'Reasoning'}")
-        print("-" * 120)
-        for row in recent:
-            pm = row.get("primary_metric", {})
-            val = pm.get(metric_name, "N/A")
-            delta = pm.get("delta_pct", "N/A")
-            approach = row.get("approach") or row.get("changed_variable", "")
-            opt = row.get("optimize_result")
-            if opt:
-                approach += f" ({opt.get('n_trials', '?')}T)"
-            approach = approach[:24]
-            reasoning = (row.get("reasoning", "") or row.get("question", ""))[:45]
-            print(f"{row.get('id', '?'):<10} {row.get('class', '?'):<10} {str(val):<12} {str(delta):<10} {approach:<25} {reasoning}")
+    # Create new iteration
+    from .engine import Engine
+    engine = Engine(project_dir)
+    engine._create_iteration(new_iter)
+
+    entry_state = enter or "PLAN"
+    engine._carry_over(source, new_iter, entry_state)
+
+    if idea:
+        idea_file = iter_dir(project_dir, new_iter) / ".user_idea.txt"
+        idea_file.write_text(idea)
+
+    set_state(project_dir, entry_state, current_iteration=new_iter)
+    print(f"Forked iter_{source} → iter_{new_iter}, entering {entry_state}")
+
+    engine.run()
+
+
+def _cmd_board(project_dir: Path, iteration: int | None) -> None:
+    """Show results dashboard."""
+    from .state import load_state
+    from .paths import results_dir, iterations_path
+    import json
+
+    ls = load_state(project_dir)
+    target_iter = iteration or ls.current_iteration
+
+    print(f"=== Iteration {target_iter} ===")
+    rdir = results_dir(project_dir, target_iter)
+    if rdir.exists():
+        for f in sorted(rdir.glob("*.json")):
+            try:
+                data = json.loads(f.read_text())
+                print(f"\n{f.stem}:")
+                for k, v in data.items():
+                    print(f"  {k}: {v}")
+            except Exception:
+                print(f"\n{f.stem}: (parse error)")
     else:
-        print("No experiments yet.")
+        print("No results yet.")
 
-    pending_queue = data.get("pending_queue", [])
-    if pending_queue:
-        print()
-        print(f"Pending Queue ({len(pending_queue)}):")
-        for h in pending_queue:
-            status_marker = ">" if h.get("status") == "running" else " "
-            print(f"  {status_marker} {h.get('id', '?'):<10} {h.get('approach', ''):<25} {h.get('description', '')[:55]}")
-
-    recent_events = data.get("recent_events", [])
-    if recent_events:
-        print()
-        print("Events:")
-        for ev in recent_events:
-            ts = ev.get("timestamp", "")
-            # Show HH:MM:SS from ISO timestamp
-            time_part = ts[11:19] if len(ts) >= 19 else ts
-            event_name = ev.get("event", "?")
-            ev_data = ev.get("data", {})
-            detail_parts = []
-            for k, v in ev_data.items():
-                detail_parts.append(f"{k}={v}")
-            detail = " ".join(detail_parts)
-            line = f"  [{time_part}] {event_name}"
-            if detail:
-                line += f" ({detail})"
-            print(line)
-
-    if gen_history:
-        print()
-        print("Generation History:")
-        print("-" * 80)
-        for entry in gen_history[-5:]:
-            ts = entry.get("timestamp", "?")[:19]
-            state = entry.get("state", "?")
-            added = entry.get("hypotheses_added_count", 0)
-            reasoning = entry.get("reasoning", "")[:60]
-            hyp_ids = ", ".join(str(h) for h in entry.get("hypotheses_added", []))
-            print(f"  [{ts}] {state} — +{added} hypotheses")
-            if reasoning:
-                print(f"    Why: {reasoning}")
-            if hyp_ids:
-                print(f"    Added: {hyp_ids}")
-            changes = entry.get("changes_made", [])
-            if changes:
-                changes_strs = [str(c) if not isinstance(c, str) else c for c in changes]
-                print(f"    Changes: {'; '.join(changes_strs)}")
+    # Show iterations history
+    ipath = iterations_path(project_dir)
+    if ipath.exists():
+        import yaml
+        data = yaml.safe_load(ipath.read_text())
+        iters = data.get("iterations", [])
+        if iters:
+            print(f"\n=== Iteration History ===")
+            for it in iters:
+                print(f"  iter_{it['id']}: {it.get('decision', '?')} — {it.get('reason', '')[:80]}")
 
 
-def _export_board(data: dict[str, Any], fmt: str, output_path: str | None) -> None:
-    """Export board data as CSV or JSON."""
-    import csv
-    import io
+def _cmd_intervene(project_dir: Path, action: str, extra_args: list[str]) -> None:
+    """Write intervention file."""
+    import yaml
+    from .paths import intervention_path
 
-    metric_name = data["metric_name"]
-    ledger = data["ledger"]
+    intervention: dict = {"action": action}
 
-    if fmt == "json":
-        rows = []
-        for row in ledger:
-            pm = row.get("primary_metric", {})
-            entry: dict[str, Any] = {
-                "id": row.get("id"),
-                "class": row.get("class"),
-                "changed_variable": row.get("changed_variable"),
-                "value": _format_value(row.get("value")),
-                metric_name: pm.get(metric_name),
-                "baseline": pm.get("baseline"),
-                "delta_pct": pm.get("delta_pct"),
-                "question": row.get("question"),
-            }
-            if row.get("approach"):
-                entry["approach"] = row["approach"]
-            opt = row.get("optimize_result")
-            if opt:
-                entry["optimize_result"] = opt
-            rows.append(entry)
-        text = json.dumps(rows, indent=2, ensure_ascii=False)
-    else:
-        buf = io.StringIO()
-        fields = ["id", "class", "approach", "changed_variable", "value", metric_name,
-                   "baseline", "delta_pct", "n_trials", "best_params", "question"]
-        writer = csv.DictWriter(buf, fieldnames=fields)
-        writer.writeheader()
-        for row in ledger:
-            pm = row.get("primary_metric", {})
-            opt = row.get("optimize_result", {})
-            bp = opt.get("best_params", {})
-            writer.writerow({
-                "id": row.get("id"),
-                "class": row.get("class"),
-                "approach": row.get("approach", ""),
-                "changed_variable": row.get("changed_variable"),
-                "value": _format_value(row.get("value")),
-                metric_name: pm.get(metric_name),
-                "baseline": pm.get("baseline"),
-                "delta_pct": pm.get("delta_pct"),
-                "n_trials": opt.get("n_trials", ""),
-                "best_params": ", ".join(f"{k}={v}" for k, v in bp.items()) if bp else "",
-                "question": row.get("question"),
-            })
-        text = buf.getvalue()
+    if action == "skip" and extra_args:
+        intervention["action"] = "skip_phase"
+        intervention["skip_phase"] = {"phase_id": extra_args[0]}
+    elif action == "modify" and len(extra_args) >= 2:
+        intervention["action"] = "modify_plan"
+        intervention["modify_plan"] = {"phase_id": extra_args[0], "changes": extra_args[1:]}
 
-    if output_path:
-        Path(output_path).write_text(text)
-        print(f"Exported to {output_path}")
-    else:
-        print(text)
-
-
-def _format_sparklines(data: dict[str, Any]) -> None:
-    """Print ASCII sparkline charts for metric trends and lever win/loss ratios."""
-    metric_name = data["metric_name"]
-    ledger = data["ledger"]
-    blocks = " ▁▂▃▄▅▆▇█"
-
-    # Metric trend sparkline
-    values = []
-    for row in ledger:
-        if row.get("class") == "BASELINE":
-            continue
-        val = row.get("primary_metric", {}).get(metric_name)
-        if val is not None:
-            values.append(val)
-
-    if values:
-        lo, hi = min(values), max(values)
-        span = hi - lo if hi != lo else 1
-        spark = "".join(blocks[min(8, int((v - lo) / span * 8))] for v in values)
-        print(f"Metric trend ({metric_name}): {spark}  [{lo:.4g} .. {hi:.4g}]")
-    else:
-        print(f"Metric trend ({metric_name}): (no data)")
-
-    # Per-approach win/loss ratio
-    approach_stats: dict[str, dict[str, int]] = {}
-    for row in ledger:
-        if row.get("class") in ("BASELINE", None):
-            continue
-        key = row.get("approach") or row.get("changed_variable", "?")
-        if key not in approach_stats:
-            approach_stats[key] = {"WIN": 0, "LOSS": 0, "INVALID": 0, "INCONCLUSIVE": 0}
-        cls = row.get("class", "INVALID")
-        if cls in approach_stats[key]:
-            approach_stats[key][cls] += 1
-
-    if approach_stats:
-        print()
-        print("Approach stats:")
-        for lever, stats in sorted(approach_stats.items()):
-            total = stats["WIN"] + stats["LOSS"]
-            ratio = f"{stats['WIN']}/{total}" if total else "0/0"
-            bar_len = min(stats["WIN"], 20)
-            bar = "█" * bar_len + "░" * (min(total, 20) - bar_len) if total else ""
-            print(f"  {lever:<20} W/L: {ratio:<8} {bar}  (+{stats['INVALID']} invalid)")
-
-
-def cmd_board(project_dir: Path, args: argparse.Namespace | None = None) -> None:
-    """Show experiment dashboard."""
-    data = _build_board_data(project_dir)
-    if data is None:
-        print("No project.yaml found. Run 'tiny-lab init' first.")
-        return
-
-    export_fmt = getattr(args, "export", None) if args else None
-    do_plot = getattr(args, "plot", False) if args else False
-    html_path = getattr(args, "html", None) if args else None
-    do_live = getattr(args, "live", False) if args else False
-    output_path = getattr(args, "output", None) if args else None
-
-    if do_live:
-        from .server import serve_dashboard
-        port = getattr(args, "port", 8505)
-        refresh = getattr(args, "refresh", 5)
-        serve_dashboard(project_dir, port=port, refresh=refresh)
-    elif export_fmt:
-        _export_board(data, export_fmt, output_path)
-    elif do_plot:
-        _format_board(data)
-        print()
-        _format_sparklines(data)
-    elif html_path:
-        from .report import generate_html_report
-        out = project_dir / html_path
-        generate_html_report(data, out)
-        print(f"Report written to {out}")
-    else:
-        _format_board(data)
+    ipath = intervention_path(project_dir)
+    ipath.parent.mkdir(parents=True, exist_ok=True)
+    ipath.write_text(yaml.dump(intervention))
+    print(f"Intervention sent: {action}")

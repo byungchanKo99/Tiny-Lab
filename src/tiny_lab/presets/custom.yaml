@@ -1,0 +1,33 @@
+autonomy:
+  mode: supervised
+  max_iterations: 5
+  allow_idea_mutation: true
+  stop_on_target: true
+  circuit_breaker:
+    max_consecutive_failures: 3
+
+intervention:
+  checkpoint: between_phases
+  timeout_seconds: 3600
+
+# Define your own states below.
+# See docs/v5-architecture.md for the full specification.
+#
+# State types:
+#   ai_session  — AI runs with allowed tools, writes completion artifact
+#   process     — tiny-lab handles internally (PHASE_RUN, PHASE_SELECT, etc.)
+#   checkpoint  — waits for .intervention.yaml
+#
+# Example state:
+#   - id: MY_STATE
+#     type: ai_session
+#     prompt: "prompts/my_prompt.md"
+#     allowed_tools: [Read, Write]
+#     allowed_write_globs:
+#       - "research/{iter}/.my_output.yaml"
+#     completion:
+#       artifact: "research/{iter}/.my_output.yaml"
+#       required_fields: [field1, field2]
+#     next: NEXT_STATE
+
+states: []

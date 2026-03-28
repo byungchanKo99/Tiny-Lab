@@ -1,22 +1,25 @@
-"""Domain-specific error hierarchy for Tiny-Lab."""
-from __future__ import annotations
+"""Exception hierarchy for tiny-lab v5."""
 
 
 class TinyLabError(Exception):
-    """Base error for all Tiny-Lab operations."""
+    """Base exception for all tiny-lab errors."""
 
 
-class BuildError(TinyLabError):
-    """Raised when BUILD phase fails."""
+class WorkflowError(TinyLabError):
+    """Invalid workflow definition."""
 
 
-class RunError(TinyLabError):
-    """Raised when RUN phase fails."""
+class StateError(TinyLabError):
+    """State machine transition error."""
 
 
-class EvaluateError(TinyLabError):
-    """Raised when EVALUATE phase fails."""
+class PhaseError(TinyLabError):
+    """Phase execution error."""
 
 
-class OptimizeError(TinyLabError):
-    """Raised when OPTIMIZE phase fails."""
+class PlanError(TinyLabError):
+    """Research plan parsing or validation error."""
+
+
+class InterventionError(TinyLabError):
+    """Intervention protocol error."""

@@ -1,0 +1,160 @@
+autonomy:
+  mode: autonomous
+  max_iterations: 5
+  allow_idea_mutation: true
+  stop_on_target: true
+  circuit_breaker:
+    max_consecutive_failures: 3
+
+intervention:
+  checkpoint: between_phases
+  timeout_seconds: 3600
+
+states:
+  # ── Understanding ──
+  - id: DOMAIN_RESEARCH
+    type: ai_session
+    prompt: "prompts/domain_research.md"
+    allowed_tools: [WebSearch, WebFetch, Read, Write]
+    allowed_write_globs:
+      - "research/{iter}/.domain_research.yaml"
+    completion:
+      artifact: "research/{iter}/.domain_research.yaml"
+      required_fields: [domain_type, sota_models, references]
+    error:
+      max_retries: 2
+      on_exhaust: skip
+    next: DATA_DEEP_DIVE
+
+  - id: DATA_DEEP_DIVE
+    type: ai_session
+    prompt: "prompts/data_deep_dive.md"
+    allowed_tools: [Read, Bash, Write]
+    allowed_write_globs:
+      - "research/{iter}/.data_analysis.yaml"
+    completion:
+      artifact: "research/{iter}/.data_analysis.yaml"
+      required_fields: [files, features]
+    error:
+      max_retries: 2
+      on_exhaust: skip
+    next: IDEA_REFINE
+
+  - id: IDEA_REFINE
+    type: ai_session
+    prompt: "prompts/idea_refine.md"
+    allowed_tools: [Read, Write]
+    interactive: true
+    interactive_fallback: self_answer
+    allowed_write_globs:
+      - "research/{iter}/.idea_refined.yaml"
+    completion:
+      artifact: "research/{iter}/.idea_refined.yaml"
+      required_fields: [goal, inputs, outputs, metric]
+    next: PLAN
+
+  # ── Planning ──
+  - id: PLAN
+    type: ai_session
+    prompt: "prompts/plan.md"
+    allowed_tools: [Read, Write]
+    allowed_write_globs:
+      - "research/{iter}/research_plan.yaml"
+    context: [iter, domain_research, data_analysis, idea_refined]
+    completion:
+      artifact: "research/{iter}/research_plan.yaml"
+      required_fields: [name, phases]
+    next: PLAN_REVIEW
+
+  - id: PLAN_REVIEW
+    type: checkpoint
+    condition:
+      source: "research/.intervention.yaml"
+      field: action
+    next:
+      approve: PHASE_SELECT
+      modify_plan: PLAN
+      stop: DONE
+
+  # ── Execution Loop ──
+  - id: PHASE_SELECT
+    type: process
+    condition:
+      check: has_pending_phases
+    next:
+      "true": PHASE_CODE
+      "false": REFLECT
+
+  - id: PHASE_CODE
+    type: ai_session
+    prompt: "prompts/phase_code.md"
+    allowed_tools: [Read, Write, Edit, Bash]
+    allowed_write_globs:
+      - "research/{iter}/phases/*"
+      - "shared/lib/*"
+    blocked_bash_patterns:
+      - "python research/*/phases/*"
+    context: [iter, current_phase, previous_results_summary]
+    completion:
+      artifact: "research/{iter}/phases/phase_*.py"
+    error:
+      max_retries: 2
+      on_exhaust: skip_phase
+    next: PHASE_RUN
+
+  - id: PHASE_RUN
+    type: process
+    blocked_write_globs:
+      - "research/{iter}/phases/*"
+    error:
+      max_retries: 1
+      on_exhaust: ask
+    next: PHASE_EVALUATE
+
+  - id: PHASE_EVALUATE
+    type: process
+    error:
+      max_retries: 2
+      retry_to: PHASE_CODE
+      on_exhaust: skip_phase
+    next: PHASE_RECORD
+
+  - id: PHASE_RECORD
+    type: process
+    next: CHECKPOINT
+
+  - id: CHECKPOINT
+    type: checkpoint
+    condition:
+      source: "research/.intervention.yaml"
+      field: action
+    next:
+      approve: PHASE_SELECT
+      modify_plan: PLAN
+      skip_phase: PHASE_SELECT
+      add_phase: PHASE_SELECT
+      stop: DONE
+
+  # ── Reflection ──
+  - id: REFLECT
+    type: ai_session
+    prompt: "prompts/reflect.md"
+    allowed_tools: [Read, Write]
+    allowed_write_globs:
+      - "research/{iter}/reflect.yaml"
+    context: [iter, all_results, iterations_history]
+    completion:
+      artifact: "research/{iter}/reflect.yaml"
+      required_fields: [decision, reason]
+    next: REFLECT_DONE
+
+  - id: REFLECT_DONE
+    type: process
+    condition:
+      source: "research/{iter}/reflect.yaml"
+      field: decision
+    next:
+      done: DONE
+      add_phases: PLAN
+      idea_mutation: IDEA_REFINE
+      domain_pivot: DOMAIN_RESEARCH

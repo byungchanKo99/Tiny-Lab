@@ -1,4 +1,4 @@
-"""Centralized file path definitions for the research directory."""
+"""Centralized path definitions for tiny-lab v5."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -8,49 +8,45 @@ def research_dir(project_dir: Path) -> Path:
     return project_dir / "research"
 
 
-def ledger_path(project_dir: Path) -> Path:
-    return research_dir(project_dir) / "ledger.jsonl"
+def shared_dir(project_dir: Path) -> Path:
+    return project_dir / "shared"
 
 
-def queue_path(project_dir: Path) -> Path:
-    return research_dir(project_dir) / "hypothesis_queue.yaml"
+def workflow_path(project_dir: Path) -> Path:
+    return research_dir(project_dir) / ".workflow.yaml"
 
 
-def project_yaml_path(project_dir: Path) -> Path:
-    return research_dir(project_dir) / "project.yaml"
+def state_path(project_dir: Path) -> Path:
+    return research_dir(project_dir) / ".state.json"
+
+
+def intervention_path(project_dir: Path) -> Path:
+    return research_dir(project_dir) / ".intervention.yaml"
+
+
+def iterations_path(project_dir: Path) -> Path:
+    return research_dir(project_dir) / ".iterations.yaml"
 
 
 def lock_path(project_dir: Path) -> Path:
     return research_dir(project_dir) / ".loop-lock"
 
 
-def state_path(project_dir: Path) -> Path:
-    return research_dir(project_dir) / ".loop_state.json"
+def iter_dir(project_dir: Path, iteration: int) -> Path:
+    return research_dir(project_dir) / f"iter_{iteration}"
 
 
-def events_path(project_dir: Path) -> Path:
-    return research_dir(project_dir) / ".events.jsonl"
+def phases_dir(project_dir: Path, iteration: int) -> Path:
+    return iter_dir(project_dir, iteration) / "phases"
 
 
-def log_path(project_dir: Path) -> Path:
-    return research_dir(project_dir) / "loop.log"
+def results_dir(project_dir: Path, iteration: int) -> Path:
+    return iter_dir(project_dir, iteration) / "results"
 
 
-def generate_summary_path(project_dir: Path) -> Path:
-    return research_dir(project_dir) / ".generate_summary.json"
+def plan_path(project_dir: Path, iteration: int) -> Path:
+    return iter_dir(project_dir, iteration) / "research_plan.yaml"
 
 
-def generate_history_path(project_dir: Path) -> Path:
-    return research_dir(project_dir) / ".generate_history.jsonl"
-
-
-def reports_dir(project_dir: Path) -> Path:
-    return research_dir(project_dir) / "reports"
-
-
-def eval_result_path(project_dir: Path, exp_id: str) -> Path:
-    return research_dir(project_dir) / f".eval_result_{exp_id}.json"
-
-
-def optimize_log_path(project_dir: Path, exp_id: str) -> Path:
-    return research_dir(project_dir) / f".optimize_{exp_id}.jsonl"
+def reflect_path(project_dir: Path, iteration: int) -> Path:
+    return iter_dir(project_dir, iteration) / "reflect.yaml"

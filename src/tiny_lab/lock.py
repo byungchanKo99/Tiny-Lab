@@ -1,42 +1,34 @@
-"""Process lock management for the research loop."""
+"""Filesystem-based lock for single-instance enforcement."""
 from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
 
-from .logging import log
+from .errors import TinyLabError
+from .paths import lock_path
 
 
-class LockManager:
-    """File-based PID lock with stale-process cleanup."""
+class LockError(TinyLabError):
+    """Another tiny-lab instance is running."""
 
-    def __init__(self, lock_path: Path):
-        self.lock_path = lock_path
-        self._acquired = False
 
-    def acquire(self) -> bool:
-        """Acquire the lock. Returns False if another live process holds it."""
-        if self.lock_path.exists():
+class Lock:
+    """Context manager for exclusive lock."""
+
+    def __init__(self, project_dir: Path) -> None:
+        self.path = lock_path(project_dir)
+
+    def __enter__(self) -> Lock:
+        if self.path.exists():
             try:
-                pid = int(self.lock_path.read_text().strip())
+                pid = int(self.path.read_text().strip())
                 os.kill(pid, 0)
-                return False
+                raise LockError(f"Another tiny-lab is running (pid={pid})")
             except (ValueError, OSError):
-                log(f"LOCK: removing orphan lock (pid={self.lock_path.read_text().strip()})")
-                self.lock_path.unlink(missing_ok=True)
-        self.lock_path.write_text(str(os.getpid()))
-        self._acquired = True
-        return True
-
-    def release(self) -> None:
-        """Release the lock if held."""
-        if self._acquired:
-            self.lock_path.unlink(missing_ok=True)
-            self._acquired = False
-
-    def __enter__(self) -> LockManager:
+                pass  # stale lock
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(str(os.getpid()))
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        self.release()
+    def __exit__(self, *args: object) -> None:
+        self.path.unlink(missing_ok=True)
