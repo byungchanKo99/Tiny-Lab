@@ -140,18 +140,21 @@ class Engine:
         log(f"ENGINE: running Claude session for {spec.id}")
         result = subprocess.run(
             cmd,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             cwd=str(self.project_dir),
             timeout=1800,  # 30 min max per state
         )
 
+        log(f"ENGINE: Claude session finished (exit={result.returncode})")
+
         if result.returncode != 0:
-            log(f"ENGINE: Claude session failed (exit={result.returncode})")
             if result.stderr:
                 for line in result.stderr.strip().splitlines()[-5:]:
                     log(f"ENGINE: stderr: {line}")
-            raise StateError(f"Claude session failed for {spec.id}")
+            # Don't fail immediately — the artifact might still have been created
+            # (Claude exits non-zero on warnings like missing stdin)
 
         # State transition happens via hook (PostToolUse detects artifact)
         # If hook didn't advance state, check if we need to advance manually
@@ -159,6 +162,10 @@ class Engine:
         if new_ls.state == ls.state:
             # Hook didn't fire — try advancing if completion artifact exists
             self._try_advance(spec, ls)
+            new_ls = load_state(self.project_dir)
+            if new_ls.state == ls.state:
+                # Still didn't advance — artifact not created or invalid
+                raise StateError(f"Claude session for {spec.id} did not produce expected artifact")
 
     def _handle_process(self, spec: StateSpec, ls: LoopState) -> None:
         """Handle a process state (no AI needed)."""
@@ -516,12 +523,14 @@ class Engine:
     def _try_advance(self, spec: StateSpec, ls: LoopState) -> None:
         """Try to advance state if completion artifact exists."""
         if not spec.completion:
+            log(f"ENGINE: _try_advance — no completion spec for {spec.id}")
             return
 
         import glob as g
         pattern = spec.completion.artifact.replace("{iter}", f"iter_{ls.current_iteration}")
         full_pattern = str(self.project_dir / pattern)
         matches = g.glob(full_pattern)
+        log(f"ENGINE: _try_advance — pattern={full_pattern}, matches={len(matches)}")
         if not matches:
             return
 
