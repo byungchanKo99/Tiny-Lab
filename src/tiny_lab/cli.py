@@ -209,36 +209,92 @@ def _cmd_fork(project_dir: Path, enter: str | None, idea: str | None, source_ite
 def _cmd_board(project_dir: Path, iteration: int | None) -> None:
     """Show results dashboard."""
     from .state import load_state
-    from .paths import results_dir, iterations_path
+    from .paths import results_dir, iterations_path, iter_dir, plan_path
+    from .events import load_events
     import json
 
     ls = load_state(project_dir)
     target_iter = iteration or ls.current_iteration
 
-    print(f"=== Iteration {target_iter} ===")
+    # Header
+    print(f"tiny-lab v5 — Iteration {target_iter}")
+    print(f"State: {ls.state}")
+    if ls.current_phase_id:
+        print(f"Current phase: {ls.current_phase_id}")
+    print()
+
+    # Plan summary
+    pp = plan_path(project_dir, target_iter)
+    if pp.exists():
+        import yaml
+        plan = yaml.safe_load(pp.read_text())
+        print(f"Plan: {plan.get('name', '?')}")
+        metric = plan.get("metric", {})
+        if metric:
+            print(f"Metric: {metric.get('name', '?')} ({metric.get('direction', '?')}, target: {metric.get('target', '?')})")
+        phases = plan.get("phases", [])
+        print(f"\nPhases ({len(phases)}):")
+        for p in phases:
+            status_icon = {"done": "+", "running": ">", "pending": " ", "skipped": "-", "failed": "!"}.get(p.get("status", "?"), "?")
+            print(f"  [{status_icon}] {p['id']}: {p.get('name', '')} ({p.get('type', 'script')})")
+        print()
+
+    # Results
     rdir = results_dir(project_dir, target_iter)
-    if rdir.exists():
+    if rdir.exists() and list(rdir.glob("*.json")):
+        print("Results:")
         for f in sorted(rdir.glob("*.json")):
             try:
                 data = json.loads(f.read_text())
-                print(f"\n{f.stem}:")
-                for k, v in data.items():
-                    print(f"  {k}: {v}")
+                # Show key metrics, not full dump
+                summary_keys = [k for k in data if k not in ("all_trials",) and not isinstance(data[k], (list, dict)) or k == "best_params"]
+                parts = []
+                for k in summary_keys:
+                    v = data[k]
+                    if isinstance(v, float):
+                        parts.append(f"{k}={v:.4f}")
+                    elif isinstance(v, dict):
+                        inner = ", ".join(f"{ik}={iv}" for ik, iv in list(v.items())[:3])
+                        parts.append(f"{k}=({inner})")
+                    else:
+                        parts.append(f"{k}={v}")
+                print(f"  {f.stem}: {', '.join(parts)}")
             except Exception:
-                print(f"\n{f.stem}: (parse error)")
-    else:
-        print("No results yet.")
+                print(f"  {f.stem}: (parse error)")
+        print()
 
-    # Show iterations history
+    # Understanding artifacts
+    idir = iter_dir(project_dir, target_iter)
+    artifacts = [".domain_research.yaml", ".data_analysis.yaml", ".idea_refined.yaml"]
+    present = [a for a in artifacts if (idir / a).exists()]
+    if present:
+        print(f"Understanding: {', '.join(a.replace('.yaml', '').lstrip('.') for a in present)}")
+
+    # Reflect
+    reflect_file = idir / "reflect.yaml" if idir.exists() else None
+    if reflect_file and reflect_file.exists():
+        import yaml
+        reflect = yaml.safe_load(reflect_file.read_text())
+        print(f"Reflect: {reflect.get('decision', '?')} — {reflect.get('reason', '')[:100]}")
+
+    # Iterations history
     ipath = iterations_path(project_dir)
     if ipath.exists():
         import yaml
-        data = yaml.safe_load(ipath.read_text())
+        data = yaml.safe_load(ipath.read_text()) or {}
         iters = data.get("iterations", [])
         if iters:
-            print(f"\n=== Iteration History ===")
+            print(f"\nIteration History:")
             for it in iters:
                 print(f"  iter_{it['id']}: {it.get('decision', '?')} — {it.get('reason', '')[:80]}")
+
+    # Recent events
+    evts = load_events(project_dir, last_n=5)
+    if evts:
+        print(f"\nRecent Events:")
+        for e in evts:
+            ts = e.get("timestamp", "?")[:19]
+            print(f"  [{ts}] {e.get('event', '?')}: {e.get('data', {})}")
 
 
 def _cmd_intervene(project_dir: Path, action: str, extra_args: list[str]) -> None:

@@ -12,6 +12,7 @@ from typing import Any
 
 import yaml
 
+from . import events
 from .conditions import resolve_condition
 from .errors import StateError, TinyLabError
 from .lock import Lock
@@ -74,6 +75,7 @@ class Engine:
 
             if ls.state == "DONE":
                 log("ENGINE: reached DONE")
+                events.loop_done(self.project_dir, "completed")
                 break
 
             # Check max iterations
@@ -90,6 +92,7 @@ class Engine:
                 break
 
             log(f"ENGINE: entering {ls.state} (type={state_spec.type}, iter={ls.current_iteration})")
+            events.state_entered(self.project_dir, ls.state, ls.current_iteration)
 
             try:
                 if state_spec.type == "ai_session":
@@ -111,10 +114,12 @@ class Engine:
 
             except TinyLabError as e:
                 log(f"ENGINE: error in {ls.state}: {e}")
+                events.error_occurred(self.project_dir, ls.state, str(e))
                 self._handle_error(state_spec, ls, e)
 
             except Exception as e:
                 log(f"ENGINE: unexpected error in {ls.state}: {e}")
+                events.error_occurred(self.project_dir, ls.state, str(e))
                 self._handle_error(state_spec, ls, e)
 
     # ------------------------------------------------------------------
@@ -185,40 +190,52 @@ class Engine:
             set_state(self.project_dir, spec.next)
 
     def _handle_checkpoint(self, spec: StateSpec, ls: LoopState) -> None:
-        """Wait for intervention or timeout."""
+        """Wait for intervention or auto-approve based on autonomy mode."""
+        # Check for existing intervention first
+        ipath = intervention_path(self.project_dir)
+        if ipath.exists():
+            self._process_intervention(spec, ls, ipath)
+            return
+
+        # Autonomous mode: auto-approve immediately
+        if self.workflow.autonomy.mode == "autonomous":
+            log(f"ENGINE: checkpoint {spec.id} — autonomous mode, auto-approving")
+            self._advance_checkpoint(spec, "approve", ls)
+            return
+
+        # Supervised mode: wait for intervention or timeout
         timeout = self.workflow.intervention.timeout_seconds
         start = time.monotonic()
-
         log(f"ENGINE: checkpoint {spec.id}, waiting for intervention (timeout={timeout}s)")
 
         while time.monotonic() - start < timeout:
-            ipath = intervention_path(self.project_dir)
             if ipath.exists():
-                intervention = yaml.safe_load(ipath.read_text())
-                ipath.unlink()
-                action = intervention.get("action", "approve")
-                log(f"ENGINE: intervention received: {action}")
-
-                if isinstance(spec.next, dict):
-                    next_state = spec.next.get(action, spec.next.get("approve", "DONE"))
-                    # Handle intervention-specific actions
-                    if action == "skip_phase" and ls.current_phase_id:
-                        update_phase_status(
-                            self.project_dir, ls.current_iteration,
-                            ls.current_phase_id, "skipped",
-                        )
-                    set_state(self.project_dir, next_state)
-                elif isinstance(spec.next, str):
-                    set_state(self.project_dir, spec.next)
+                self._process_intervention(spec, ls, ipath)
                 return
-
             time.sleep(5)
 
-        # Timeout — auto approve
         log(f"ENGINE: checkpoint timeout, auto-advancing")
+        self._advance_checkpoint(spec, "approve", ls)
+
+    def _process_intervention(self, spec: StateSpec, ls: LoopState, ipath: Path) -> None:
+        """Read and apply an intervention file."""
+        intervention = yaml.safe_load(ipath.read_text())
+        ipath.unlink()
+        action = intervention.get("action", "approve")
+        log(f"ENGINE: intervention received: {action}")
+
+        if action == "skip_phase" and ls.current_phase_id:
+            update_phase_status(
+                self.project_dir, ls.current_iteration,
+                ls.current_phase_id, "skipped",
+            )
+        self._advance_checkpoint(spec, action, ls)
+
+    def _advance_checkpoint(self, spec: StateSpec, action: str, ls: LoopState) -> None:
+        """Advance from checkpoint based on action."""
         if isinstance(spec.next, dict):
-            default = spec.next.get("approve", list(spec.next.values())[0])
-            set_state(self.project_dir, default)
+            next_state = spec.next.get(action, spec.next.get("approve", "DONE"))
+            set_state(self.project_dir, next_state)
         elif isinstance(spec.next, str):
             set_state(self.project_dir, spec.next)
 
@@ -247,13 +264,14 @@ class Engine:
                     shutil.copy2(src, dst)
                     log(f"ENGINE: reusing {reuse} for {phase_id}")
             set_state(self.project_dir, ls.state, current_phase_id=phase_id)
+            events.phase_started(self.project_dir, phase_id, ls.current_iteration)
             log(f"ENGINE: selected phase {phase_id} — {phase.get('name', '')}")
         else:
             set_state(self.project_dir, ls.state, current_phase_id=None)
             log("ENGINE: no pending phases")
 
     def _run_phase(self, ls: LoopState) -> None:
-        """Execute the current phase script."""
+        """Execute the current phase — script or optimize type."""
         phase_id = ls.current_phase_id
         if not phase_id:
             raise StateError("PHASE_RUN but no current_phase_id")
@@ -265,8 +283,19 @@ class Engine:
 
         update_phase_status(self.project_dir, ls.current_iteration, phase_id, "running")
 
+        phase_type = phase.get("type", "script")
+        if phase_type == "optimize":
+            self._run_phase_optimize(phase, ls)
+        elif phase_type == "manual":
+            log(f"ENGINE: phase {phase_id} is manual — waiting for intervention")
+            # Will be handled by checkpoint
+        else:
+            self._run_phase_script(phase, ls)
+
+    def _run_phase_script(self, phase: dict[str, Any], ls: LoopState) -> None:
+        """Run a script-type phase."""
+        phase_id = phase["id"]
         pdir = phases_dir(self.project_dir, ls.current_iteration)
-        # Find the phase script
         scripts = list(pdir.glob(f"*{phase_id}*"))
         if not scripts:
             raise StateError(f"No script found for phase {phase_id} in {pdir}")
@@ -298,7 +327,53 @@ class Engine:
                     log(f"ENGINE: stderr: {line}")
             raise StateError(f"Phase {phase_id} script failed")
 
-        log(f"ENGINE: phase {phase_id} completed")
+        log(f"ENGINE: phase {phase_id} script completed")
+
+    def _run_phase_optimize(self, phase: dict[str, Any], ls: LoopState) -> None:
+        """Run an optimize-type phase using the optimizer inner loop."""
+        import json
+        from .optimize import run_optimize
+
+        phase_id = phase["id"]
+        opt_config = phase.get("optimize", {})
+        plan = load_plan(self.project_dir, ls.current_iteration)
+        metric = plan.get("metric", {})
+        metric_name = metric.get("name", "metric")
+        direction = metric.get("direction", "minimize")
+
+        # Find the phase script (train script)
+        pdir = phases_dir(self.project_dir, ls.current_iteration)
+        scripts = list(pdir.glob(f"*{phase_id}*"))
+        if not scripts:
+            raise StateError(f"No script found for optimize phase {phase_id}")
+
+        base_command = f"python {scripts[0]}"
+
+        # Get levers from plan or phase config
+        levers = plan.get("levers", {})
+
+        log(f"ENGINE: running optimize phase {phase_id} ({opt_config.get('type', 'random')})")
+        result = run_optimize(
+            base_command=base_command,
+            phase_config=opt_config,
+            metric_name=metric_name,
+            direction=direction,
+            project_dir=self.project_dir,
+            levers=levers,
+        )
+
+        # Write results
+        rdir = results_dir(self.project_dir, ls.current_iteration)
+        rdir.mkdir(parents=True, exist_ok=True)
+        result_data = {
+            metric_name: result.best_value,
+            "best_params": result.best_params,
+            "n_trials": result.n_trials,
+            "total_seconds": result.total_seconds,
+            "all_trials": result.all_trials,
+        }
+        (rdir / f"{phase_id}.json").write_text(json.dumps(result_data, indent=2, default=str))
+        log(f"ENGINE: optimize phase {phase_id} done — best {metric_name}={result.best_value}")
 
     def _evaluate_phase(self, ls: LoopState) -> None:
         """Validate phase output against plan schema."""
@@ -339,6 +414,7 @@ class Engine:
                 self.project_dir, ls.current_iteration,
                 ls.current_phase_id, "done",
             )
+            events.phase_completed(self.project_dir, ls.current_phase_id, ls.current_iteration, "done")
             log(f"ENGINE: phase {ls.current_phase_id} recorded as done")
 
     # ------------------------------------------------------------------
