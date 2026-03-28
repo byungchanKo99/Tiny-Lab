@@ -127,11 +127,8 @@ class Engine:
         prompt = self._render_prompt(spec, context)
 
         # Build claude command
-        cmd = [
-            "claude",
-            "--print",
-            "--prompt", prompt,
-        ]
+        # claude -p "prompt" --allowedTools "Tool1,Tool2"
+        cmd = ["claude", "-p", prompt]
         if spec.allowed_tools:
             cmd.extend(["--allowedTools", ",".join(spec.allowed_tools)])
 
@@ -447,7 +444,7 @@ class Engine:
 
         import glob as g
         pattern = spec.completion.artifact.replace("{iter}", f"iter_{ls.current_iteration}")
-        full_pattern = str(self.project_dir / "research" / pattern)
+        full_pattern = str(self.project_dir / pattern)
         matches = g.glob(full_pattern)
         if not matches:
             return
