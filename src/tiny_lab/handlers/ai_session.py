@@ -24,7 +24,7 @@ class AiSessionHandler:
         context = _build_context(spec, ls, ctx)
         prompt = _render_prompt(spec, context, ctx)
 
-        cmd = ["claude", "-p", prompt, "--output-format", "json"]
+        cmd = ["claude", "-p", prompt, "--output-format", "json", "--model", "sonnet"]
         if spec.allowed_tools:
             cmd.extend(["--allowedTools", ",".join(spec.allowed_tools)])
 
@@ -268,7 +268,7 @@ def _try_fix_artifact(spec: StateSpec, ls: LoopState, ctx: EngineContext, proble
     )
     log(f"ENGINE: asking Claude to fix artifact: {problem}")
 
-    cmd = ["claude", "-p", fix_prompt, "--allowedTools", "Read,Write,Edit"]
+    cmd = ["claude", "-p", fix_prompt, "--allowedTools", "Read,Write,Edit", "--model", "sonnet"]
     if ls.session_id:
         cmd.extend(["--resume", ls.session_id])
     subprocess.run(
@@ -315,7 +315,7 @@ def _try_fix_json(spec: StateSpec, ls: LoopState, ctx: EngineContext) -> bool:
             f"Do NOT change the content — only fix the syntax."
         )
         subprocess.run(
-            ["claude", "-p", fix_prompt, "--allowedTools", "Read,Write,Edit"],
+            ["claude", "-p", fix_prompt, "--allowedTools", "Read,Write,Edit", "--model", "sonnet"],
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
