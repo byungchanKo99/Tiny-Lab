@@ -13,43 +13,67 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         prog="tiny-lab",
         description="Plan-driven AI research loop",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+Quick start:
+  tiny-lab init                 Set up project (creates research/, prompts/, hooks)
+  echo "my idea" > research/.user_idea.txt
+  tiny-lab run                  Start the loop (stops at PLAN_REVIEW for approval)
+  tiny-lab intervene approve    Approve plan, start execution
+  tiny-lab board                View results
+
+Workflow: Understand → Plan → PLAN_REVIEW (stop) → Execute → Reflect → Iterate
+""",
     )
     sub = parser.add_subparsers(dest="command")
 
     # init
-    init_p = sub.add_parser("init", help="Initialize research project")
+    init_p = sub.add_parser("init", help="Initialize research project",
+                            description="Set up directory structure, hooks, and prompt templates.")
     init_p.add_argument("--preset", default="ml-experiment",
                         choices=["ml-experiment", "review-paper", "novel-method",
                                  "data-analysis", "custom"],
                         help="Workflow preset (default: ml-experiment)")
 
     # run
-    run_p = sub.add_parser("run", help="Start the research loop")
-    run_p.add_argument("idea", nargs="?", help="Research idea (natural language)")
+    run_p = sub.add_parser("run", help="Start the research loop",
+                           description="Run the loop from current state. Stops at PLAN_REVIEW for approval.")
+    run_p.add_argument("idea", nargs="?", help="Research idea (also saved to research/.user_idea.txt)")
 
     # status
-    sub.add_parser("status", help="Show current state")
+    sub.add_parser("status", help="Show current state, iteration, phase")
 
     # stop
-    sub.add_parser("stop", help="Stop the running loop")
+    sub.add_parser("stop", help="Send stop signal to running loop")
 
     # resume
-    resume_p = sub.add_parser("resume", help="Resume from last state")
+    resume_p = sub.add_parser("resume", help="Resume from last state",
+                              description="Resume a stopped or failed loop.")
     resume_p.add_argument("--add-phase", help="Add a phase before resuming")
     resume_p.add_argument("--from", dest="from_phase", help="Resume from specific phase")
 
     # fork
-    fork_p = sub.add_parser("fork", help="Fork to new iteration")
+    fork_p = sub.add_parser("fork", help="Fork to new iteration",
+                            description="Create a new iteration, carrying over artifacts from a previous one.")
     fork_p.add_argument("--enter", help="State to enter (e.g., PLAN, IDEA_REFINE)")
     fork_p.add_argument("--idea", help="New idea for the fork")
     fork_p.add_argument("source_iter", nargs="?", type=int, help="Source iteration to fork from")
 
     # board
-    board_p = sub.add_parser("board", help="Show results dashboard")
+    board_p = sub.add_parser("board", help="Results dashboard with metrics")
     board_p.add_argument("--iter", type=int, help="Specific iteration")
 
     # intervene
-    intervene_p = sub.add_parser("intervene", help="Send intervention")
+    intervene_p = sub.add_parser("intervene", help="Send intervention to running loop",
+                                 description="""\
+Send an intervention while the loop is waiting at a checkpoint.
+
+Actions:
+  approve     Approve plan or phase result, continue execution
+  skip        Skip current phase (requires phase_id arg)
+  modify      Send plan back for revision
+  stop        Stop the loop
+  add-phase   Add a new phase to the plan""")
     intervene_p.add_argument("action", choices=["approve", "skip", "modify", "stop", "add-phase"])
     intervene_p.add_argument("args", nargs="*")
 
@@ -129,8 +153,6 @@ def _cmd_init(project_dir: Path, preset: str) -> None:
     wf_path = workflow_path(project_dir)
     shutil.copy2(preset_file, wf_path)
     print(f"Initialized with preset: {preset}")
-    print(f"Workflow: {wf_path}")
-    print(f"Edit research/.workflow.json to customize.")
 
     # Copy hooks
     hooks_src = Path(__file__).parent / "hooks"
@@ -164,7 +186,16 @@ def _cmd_init(project_dir: Path, preset: str) -> None:
     gitignore_dst = rd / ".gitignore"
     if gitignore_src.exists() and not gitignore_dst.exists():
         shutil.copy2(gitignore_src, gitignore_dst)
-        print("research/.gitignore installed")
+
+    # Next steps
+    print()
+    print("Next steps:")
+    print(f"  1. Write your idea:  echo \"your idea\" > research/.user_idea.txt")
+    print(f"  2. Start the loop:   tiny-lab run")
+    print(f"  3. Review the plan:  tiny-lab board")
+    print(f"  4. Approve:          tiny-lab intervene approve")
+    print()
+    print("See CLAUDE.md for full guide.")
 
 
 def _load_registry(project_dir: Path) -> "HandlerRegistry":  # type: ignore[name-defined]  # noqa: F821
