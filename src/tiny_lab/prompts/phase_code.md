@@ -9,7 +9,7 @@ Previous results:
 
 ## Your Task
 
-Read the full plan at research/{iter}/research_plan.yaml and find the phase with id "{current_phase_id}".
+Read the full plan at research/{iter}/research_plan.json and find the phase with id "{current_phase_id}".
 Read the methodology section carefully — it tells you exactly what to implement.
 Read previous phase results from research/{iter}/results/ to use as context.
 
@@ -41,11 +41,11 @@ from pathlib import Path
 # 3. Load previous phase results (if depends_on)
 # results_dir = Path(os.environ.get("TINYLAB_RESULTS_DIR", "research/{iter}/results"))
 
-# 4. Main logic — follow the methodology from research_plan.yaml
+# 4. Main logic — follow the methodology from research_plan.json
 
 # 5. Save results matching the expected_outputs.report.schema
 results = {{
-    # MUST match the schema defined in research_plan.yaml
+    # MUST match the schema defined in research_plan.json
 }}
 output_path = Path("research/{iter}/results/{current_phase_id}.json")
 output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -56,7 +56,7 @@ print(f"Results saved to {{output_path}}")
 ### Critical rules
 
 1. The script must be SELF-CONTAINED — install its own dependencies
-2. The output JSON MUST match the schema in research_plan.yaml exactly
+2. The output JSON MUST match the schema in research_plan.json exactly
 3. Read previous phase results when the methodology references them
 4. Print progress to stdout so the user can monitor
 5. If the plan says "reuse phase_X's function", import from that phase's script or shared/lib/

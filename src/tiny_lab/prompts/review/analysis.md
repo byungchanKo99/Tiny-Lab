@@ -4,8 +4,8 @@ Current iteration: {iter}
 
 ## Context
 
-Read research/{iter}/.papers_collected.yaml for the list of accepted papers.
-Read research/{iter}/.scope.yaml for the research questions.
+Read research/{iter}/.papers_collected.json for the list of accepted papers.
+Read research/{iter}/.scope.json for the research questions.
 
 ## Your Task
 
@@ -25,7 +25,7 @@ Then identify cross-paper patterns:
 
 ## Output
 
-Write to research/{iter}/.paper_analysis.yaml:
+Write to research/{iter}/.paper_analysis.json:
 
 - themes: list of identified themes with supporting papers
 - comparisons: key comparison points across papers

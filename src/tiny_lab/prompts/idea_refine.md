@@ -7,8 +7,8 @@ Project directory: {project_dir}
 
 You have domain knowledge and data understanding from previous steps:
 
-- Read research/{iter}/.domain_research.yaml — domain SOTA, required preprocessing, pitfalls
-- Read research/{iter}/.data_analysis.yaml — actual data characteristics, quality issues
+- Read research/{iter}/.domain_research.json — domain SOTA, required preprocessing, pitfalls
+- Read research/{iter}/.data_analysis.json — actual data characteristics, quality issues
 - Read research/.user_idea.txt — the user's original idea (if exists)
 
 ## Your Task
@@ -53,7 +53,7 @@ Compare the user's idea against domain knowledge:
 
 ## Step 5: Write refined idea
 
-Write to research/{iter}/.idea_refined.yaml with required fields:
+Write to research/{iter}/.idea_refined.json with required fields:
 
 - goal: one sentence, specific and measurable
 - inputs: exact list of features/data

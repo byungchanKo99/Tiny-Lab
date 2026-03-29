@@ -82,7 +82,7 @@ def run_optimize(
 
     Args:
         base_command: The baseline command to modify
-        phase_config: The phase's optimize section from research_plan.yaml
+        phase_config: The phase's optimize section from research_plan.json
         metric_name: Metric to extract from stdout
         direction: "minimize" or "maximize"
         project_dir: Project root

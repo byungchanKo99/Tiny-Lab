@@ -2,11 +2,11 @@
 .state.json
 .loop-lock
 .events.jsonl
-.intervention.yaml
-.manual_wait.yaml
+.intervention.json
+.manual_wait.json
 .user_idea.txt
 
 # Iteration hidden artifacts (generated, not source)
-iter_*/.domain_research.yaml
-iter_*/.data_analysis.yaml
-iter_*/.idea_refined.yaml
+iter_*/.domain_research.json
+iter_*/.data_analysis.json
+iter_*/.idea_refined.json

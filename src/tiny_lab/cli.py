@@ -120,8 +120,8 @@ def _cmd_init(project_dir: Path, preset: str) -> None:
     rd.mkdir(parents=True, exist_ok=True)
     shared_dir(project_dir).mkdir(parents=True, exist_ok=True)
 
-    # Copy preset to .workflow.yaml
-    preset_file = Path(__file__).parent / "presets" / f"{preset}.yaml"
+    # Copy preset to .workflow.json
+    preset_file = Path(__file__).parent / "presets" / f"{preset}.json"
     if not preset_file.exists():
         print(f"Preset not found: {preset}")
         sys.exit(1)
@@ -130,7 +130,7 @@ def _cmd_init(project_dir: Path, preset: str) -> None:
     shutil.copy2(preset_file, wf_path)
     print(f"Initialized with preset: {preset}")
     print(f"Workflow: {wf_path}")
-    print(f"Edit research/.workflow.yaml to customize.")
+    print(f"Edit research/.workflow.json to customize.")
 
     # Copy hooks
     hooks_src = Path(__file__).parent / "hooks"
@@ -202,12 +202,12 @@ def _cmd_status(project_dir: Path) -> None:
 
 def _cmd_stop(project_dir: Path) -> None:
     """Stop by writing intervention."""
-    import yaml
+    import json
     from .paths import intervention_path
 
     ipath = intervention_path(project_dir)
     ipath.parent.mkdir(parents=True, exist_ok=True)
-    ipath.write_text(yaml.dump({"action": "stop"}))
+    ipath.write_text(json.dumps({"action": "stop"}, indent=2))
     print("Stop signal sent.")
 
 
@@ -279,8 +279,8 @@ def _cmd_board(project_dir: Path, iteration: int | None) -> None:
     # Plan summary
     pp = plan_path(project_dir, target_iter)
     if pp.exists():
-        import yaml
-        plan = yaml.safe_load(pp.read_text())
+        import json
+        plan = json.loads(pp.read_text())
         print(f"Plan: {plan.get('name', '?')}")
         metric = plan.get("metric", {})
         if metric:
@@ -318,23 +318,23 @@ def _cmd_board(project_dir: Path, iteration: int | None) -> None:
 
     # Understanding artifacts
     idir = iter_dir(project_dir, target_iter)
-    artifacts = [".domain_research.yaml", ".data_analysis.yaml", ".idea_refined.yaml"]
+    artifacts = [".domain_research.json", ".data_analysis.json", ".idea_refined.json"]
     present = [a for a in artifacts if (idir / a).exists()]
     if present:
-        print(f"Understanding: {', '.join(a.replace('.yaml', '').lstrip('.') for a in present)}")
+        print(f"Understanding: {', '.join(a.replace('.json', '').lstrip('.') for a in present)}")
 
     # Reflect
-    reflect_file = idir / "reflect.yaml" if idir.exists() else None
+    reflect_file = idir / "reflect.json" if idir.exists() else None
     if reflect_file and reflect_file.exists():
-        import yaml
-        reflect = yaml.safe_load(reflect_file.read_text())
+        import json
+        reflect = json.loads(reflect_file.read_text())
         print(f"Reflect: {reflect.get('decision', '?')} — {reflect.get('reason', '')[:100]}")
 
     # Iterations history
     ipath = iterations_path(project_dir)
     if ipath.exists():
-        import yaml
-        data = yaml.safe_load(ipath.read_text()) or {}
+        import json
+        data = json.loads(ipath.read_text()) or {}
         iters = data.get("iterations", [])
         if iters:
             print(f"\nIteration History:")
@@ -352,7 +352,7 @@ def _cmd_board(project_dir: Path, iteration: int | None) -> None:
 
 def _cmd_intervene(project_dir: Path, action: str, extra_args: list[str]) -> None:
     """Write intervention file."""
-    import yaml
+    import json
     from .paths import intervention_path
 
     intervention: dict = {"action": action}
@@ -366,5 +366,5 @@ def _cmd_intervene(project_dir: Path, action: str, extra_args: list[str]) -> Non
 
     ipath = intervention_path(project_dir)
     ipath.parent.mkdir(parents=True, exist_ok=True)
-    ipath.write_text(yaml.dump(intervention))
+    ipath.write_text(json.dumps(intervention, indent=2))
     print(f"Intervention sent: {action}")

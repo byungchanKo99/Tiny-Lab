@@ -57,7 +57,7 @@ tiny-lab init --preset review-paper
 ## How It Works
 
 1. **Understand** — domain research, data analysis, Socratic idea refinement
-2. **Plan** — generate research_plan.yaml with phases, methodology, output schemas
+2. **Plan** — generate research_plan.json with phases, methodology, output schemas
 3. **Execute** — AI generates code for each phase, runs it, validates output
 4. **Reflect** — analyze results, decide: done / add phases / change idea / pivot domain
 
@@ -67,15 +67,15 @@ The loop can iterate autonomously: reflect → modify idea → re-plan → re-ex
 
 | File                                 | Role                                                  |
 | ------------------------------------ | ----------------------------------------------------- |
-| `research/.workflow.yaml`            | **System**: how the state machine works (from preset) |
-| `research/iter_N/research_plan.yaml` | **Content**: what experiments to run (AI-generated)   |
+| `research/.workflow.json`            | **System**: how the state machine works (from preset) |
+| `research/iter_N/research_plan.json` | **Content**: what experiments to run (AI-generated)   |
 
 ## Key Design
 
 - **Hook-enforced state machine**: Claude Code hooks block actions not allowed in current state. AI can't skip phases.
-- **Artifact-driven transitions**: writing `.domain_research.yaml` auto-advances to DATA_DEEP_DIVE. No "I'm done" declarations.
+- **Artifact-driven transitions**: writing `.domain_research.json` auto-advances to DATA_DEEP_DIVE. No "I'm done" declarations.
 - **Iteration management**: each Understanding→Plan→Execute→Reflect cycle gets its own `iter_N/` directory.
-- **Meta workflow**: states defined in YAML, not code. Add/remove/reorder phases by editing `.workflow.yaml`.
+- **Meta workflow**: states defined in YAML, not code. Add/remove/reorder phases by editing `.workflow.json`.
 - **Intervention protocol**: lab manager writes `.intervention.yaml` to approve, skip, modify, or stop.
 
 ## CLI
@@ -96,15 +96,15 @@ The loop can iterate autonomously: reflect → modify idea → re-plan → re-ex
 ```
 project/
   research/
-    .workflow.yaml           # State machine definition
+    .workflow.json           # State machine definition
     .state.json              # Current state
-    .iterations.yaml         # Iteration history
+    .iterations.json         # Iteration history
     iter_1/
-      research_plan.yaml     # What to do
-      .domain_research.yaml  # Domain knowledge
-      .data_analysis.yaml    # Data understanding
-      .idea_refined.yaml     # Concrete idea
-      reflect.yaml           # Reflection + decision
+      research_plan.json     # What to do
+      .domain_research.json  # Domain knowledge
+      .data_analysis.json    # Data understanding
+      .idea_refined.json     # Concrete idea
+      reflect.json           # Reflection + decision
       phases/                # AI-generated scripts
       results/               # Phase outputs (JSON)
   shared/

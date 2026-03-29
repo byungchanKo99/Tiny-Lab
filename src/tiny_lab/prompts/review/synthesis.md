@@ -6,10 +6,10 @@ Current iteration: {iter}
 
 Read all previous artifacts:
 
-- research/{iter}/.scope.yaml — research questions
-- research/{iter}/.papers_collected.yaml — papers
-- research/{iter}/.paper_analysis.yaml — analysis and themes
-- research/{iter}/.taxonomy.yaml — taxonomy
+- research/{iter}/.scope.json — research questions
+- research/{iter}/.papers_collected.json — papers
+- research/{iter}/.paper_analysis.json — analysis and themes
+- research/{iter}/.taxonomy.json — taxonomy
 
 ## Your Task
 

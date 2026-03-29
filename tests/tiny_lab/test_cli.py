@@ -6,7 +6,6 @@ import shutil
 from pathlib import Path
 
 import pytest
-import yaml
 
 
 class TestInit:
@@ -14,7 +13,7 @@ class TestInit:
         from tiny_lab.cli import _cmd_init
         _cmd_init(tmp_path, "ml-experiment")
 
-        assert (tmp_path / "research" / ".workflow.yaml").exists()
+        assert (tmp_path / "research" / ".workflow.json").exists()
         assert (tmp_path / ".claude" / "hooks" / "state-gate.sh").exists()
         assert (tmp_path / ".claude" / "hooks" / "state-advance.sh").exists()
         assert (tmp_path / "prompts" / "domain_research.md").exists()
@@ -57,7 +56,7 @@ class TestInit:
         from tiny_lab.cli import _cmd_init
         _cmd_init(tmp_path, "review-paper")
 
-        wf = yaml.safe_load((tmp_path / "research" / ".workflow.yaml").read_text())
+        wf = json.loads((tmp_path / "research" / ".workflow.json").read_text())
         state_ids = [s["id"] for s in wf["states"]]
         assert "SCOPE_DEFINITION" in state_ids
         assert "LITERATURE_SEARCH" in state_ids
@@ -90,9 +89,9 @@ class TestIntervene:
         (tmp_path / "research").mkdir()
         _cmd_intervene(tmp_path, "approve", [])
 
-        ipath = tmp_path / "research" / ".intervention.yaml"
+        ipath = tmp_path / "research" / ".intervention.json"
         assert ipath.exists()
-        data = yaml.safe_load(ipath.read_text())
+        data = json.loads(ipath.read_text())
         assert data["action"] == "approve"
 
     def test_skip_phase(self, tmp_path):
@@ -100,6 +99,6 @@ class TestIntervene:
         (tmp_path / "research").mkdir()
         _cmd_intervene(tmp_path, "skip", ["phase_2"])
 
-        data = yaml.safe_load((tmp_path / "research" / ".intervention.yaml").read_text())
+        data = json.loads((tmp_path / "research" / ".intervention.json").read_text())
         assert data["action"] == "skip_phase"
         assert data["skip_phase"]["phase_id"] == "phase_2"

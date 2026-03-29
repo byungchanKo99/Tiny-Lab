@@ -1,10 +1,10 @@
 #!/bin/bash
-# PreToolUse hook — enforces state constraints from workflow.yaml
+# PreToolUse hook — enforces state constraints from workflow.json
 # Blocks Write/Edit/Bash operations not allowed in current state.
 #
-# Reads workflow.yaml dynamically — no hardcoded state logic.
+# Reads workflow.json dynamically — no hardcoded state logic.
 
-WORKFLOW="research/.workflow.yaml"
+WORKFLOW="research/.workflow.json"
 STATE_FILE="research/.state.json"
 
 # Skip if no state file (not initialized yet)
@@ -19,12 +19,12 @@ COMMAND="${CLAUDE_TOOL_INPUT_COMMAND:-}"
 
 [[ "$STATE" == "INIT" ]] && exit 0
 
-# Extract state rules from workflow.yaml
+# Extract state rules from workflow.json
 RULES=$(python3 << PYEOF
-import yaml, json, sys
+import json, sys
 
 try:
-    wf = yaml.safe_load(open("$WORKFLOW"))
+    wf = json.load(open("$WORKFLOW"))
     state = next((s for s in wf.get("states", []) if s["id"] == "$STATE"), None)
     if state:
         print(json.dumps(state))

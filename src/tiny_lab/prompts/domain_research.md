@@ -36,7 +36,7 @@ Use WebSearch to find relevant papers and techniques. Search MULTIPLE queries:
 
 ## Step 3: Synthesize findings
 
-Write your findings to research/{iter}/.domain_research.yaml with these required fields:
+Write your findings to research/{iter}/.domain_research.json with these required fields:
 
 - domain_type: detected problem type (e.g., "time_series_regression", "tabular_classification")
 - sota_models: list of state-of-the-art models for this domain

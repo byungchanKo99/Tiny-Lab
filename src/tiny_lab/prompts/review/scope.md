@@ -31,7 +31,7 @@ Exclusion criteria: what disqualifies a paper?
 
 ## Output
 
-Write to research/{iter}/.scope.yaml:
+Write to research/{iter}/.scope.json:
 
 - research_questions: list of questions
 - inclusion_criteria: list of criteria

@@ -8,8 +8,8 @@ Previous results:
 
 ## Your Task
 
-Read ALL results from research/{iter}/results/ and the research plan at research/{iter}/research_plan.yaml.
-Also read research/.iterations.yaml if it exists (previous iteration history).
+Read ALL results from research/{iter}/results/ and the research plan at research/{iter}/research_plan.json.
+Also read research/.iterations.json if it exists (previous iteration history).
 
 ## Step 1: Analyze results
 
@@ -50,7 +50,7 @@ Choose ONE of these decisions:
 
 ## Step 5: Write reflection
 
-Write to research/{iter}/reflect.yaml with required fields:
+Write to research/{iter}/reflect.json with required fields:
 
 - decision: one of done, add_phases, idea_mutation, domain_pivot
 - reason: 2-3 sentences explaining why, citing specific experiment results

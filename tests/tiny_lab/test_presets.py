@@ -13,7 +13,7 @@ PRESETS_DIR = Path(__file__).parent.parent.parent / "src" / "tiny_lab" / "preset
 
 @pytest.fixture(params=["ml-experiment", "review-paper", "novel-method", "data-analysis"])
 def preset_path(request) -> Path:
-    return PRESETS_DIR / f"{request.param}.yaml"
+    return PRESETS_DIR / f"{request.param}.json"
 
 
 class TestPresets:
@@ -47,9 +47,9 @@ class TestPresets:
 
 class TestCustomPreset:
     def test_custom_loads_empty(self):
-        path = PRESETS_DIR / "custom.yaml"
+        path = PRESETS_DIR / "custom.json"
         # Custom has empty states — should not crash but may not validate
         # (empty states list is caught by load_workflow)
-        import yaml
-        data = yaml.safe_load(path.read_text())
+        import json
+        data = json.loads(path.read_text())
         assert data["states"] == []

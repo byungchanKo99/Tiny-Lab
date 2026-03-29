@@ -5,7 +5,7 @@ Project directory: {project_dir}
 
 ## Context
 
-Read research/{iter}/.domain_research.yaml first — this contains domain knowledge that should inform your analysis. Without domain context, you'll miss critical insights.
+Read research/{iter}/.domain_research.json first — this contains domain knowledge that should inform your analysis. Without domain context, you'll miss critical insights.
 
 ## Step 1: Scan data files
 
@@ -24,7 +24,7 @@ For each data file:
 4. Statistics — mean, min, max, std for numeric columns.
 5. Missing values — percentage per column.
 6. **Domain interpretation** — this is what makes this step valuable:
-   - Cross-reference with .domain_research.yaml
+   - Cross-reference with .domain_research.json
    - Example: if domain says "gravity removal is essential" and you see accel_z mean = -9.8, note "gravity NOT removed"
    - Example: if domain says "EKF is inaccurate during high-G maneuvers", check position variance during high acceleration
 
@@ -38,7 +38,7 @@ If target/output columns are identifiable:
 
 ## Step 4: Write analysis
 
-Write to research/{iter}/.data_analysis.yaml with required fields:
+Write to research/{iter}/.data_analysis.json with required fields:
 
 - files: list of data files found, with path, rows, cols, sampling frequency
 - features: list of features with name, type, stats, and domain_note where relevant

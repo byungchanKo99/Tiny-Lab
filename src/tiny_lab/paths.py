@@ -13,7 +13,7 @@ def shared_dir(project_dir: Path) -> Path:
 
 
 def workflow_path(project_dir: Path) -> Path:
-    return research_dir(project_dir) / ".workflow.yaml"
+    return research_dir(project_dir) / ".workflow.json"
 
 
 def state_path(project_dir: Path) -> Path:
@@ -21,11 +21,11 @@ def state_path(project_dir: Path) -> Path:
 
 
 def intervention_path(project_dir: Path) -> Path:
-    return research_dir(project_dir) / ".intervention.yaml"
+    return research_dir(project_dir) / ".intervention.json"
 
 
 def iterations_path(project_dir: Path) -> Path:
-    return research_dir(project_dir) / ".iterations.yaml"
+    return research_dir(project_dir) / ".iterations.json"
 
 
 def lock_path(project_dir: Path) -> Path:
@@ -45,8 +45,8 @@ def results_dir(project_dir: Path, iteration: int) -> Path:
 
 
 def plan_path(project_dir: Path, iteration: int) -> Path:
-    return iter_dir(project_dir, iteration) / "research_plan.yaml"
+    return iter_dir(project_dir, iteration) / "research_plan.json"
 
 
 def reflect_path(project_dir: Path, iteration: int) -> Path:
-    return iter_dir(project_dir, iteration) / "reflect.yaml"
+    return iter_dir(project_dir, iteration) / "reflect.json"

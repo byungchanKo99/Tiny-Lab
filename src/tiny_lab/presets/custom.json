@@ -1,0 +1,16 @@
+{
+  "autonomy": {
+    "mode": "supervised",
+    "max_iterations": 5,
+    "allow_idea_mutation": true,
+    "stop_on_target": true,
+    "circuit_breaker": {
+      "max_consecutive_failures": 3
+    }
+  },
+  "intervention": {
+    "checkpoint": "between_phases",
+    "timeout_seconds": 3600
+  },
+  "states": []
+}

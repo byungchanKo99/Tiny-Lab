@@ -4,7 +4,7 @@ Current iteration: {iter}
 
 ## Context
 
-Read research/{iter}/.domain_research.yaml for domain SOTA and references.
+Read research/{iter}/.domain_research.json for domain SOTA and references.
 
 ## Your Task
 
@@ -22,7 +22,7 @@ Use WebSearch for additional targeted searches:
 
 ## Output
 
-Write to research/{iter}/.related_work.yaml:
+Write to research/{iter}/.related_work.json:
 
 - papers: detailed list of related papers
 - limitations_of_existing: specific limitations grouped by method

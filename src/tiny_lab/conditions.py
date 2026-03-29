@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import yaml
+import json
 
 from .errors import StateError
 from .workflow import ConditionSpec
@@ -38,12 +38,15 @@ def resolve_condition(
 
 
 def _read_field(source: str, field_name: str, project_dir: Path, iteration: int) -> Any:
-    """Read a field from a YAML file."""
+    """Read a field from a JSON file."""
     resolved = source.replace("{iter}", f"iter_{iteration}")
     path = project_dir / "research" / resolved
     if not path.exists():
         raise StateError(f"Condition source not found: {path}")
-    data = yaml.safe_load(path.read_text())
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError as e:
+        raise StateError(f"Invalid JSON in {path}: {e}")
     if not isinstance(data, dict) or field_name not in data:
         raise StateError(f"Field '{field_name}' not found in {path}")
     return data[field_name]

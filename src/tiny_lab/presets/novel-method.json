@@ -1,0 +1,297 @@
+{
+  "autonomy": {
+    "mode": "autonomous",
+    "max_iterations": 5,
+    "allow_idea_mutation": true,
+    "stop_on_target": true,
+    "circuit_breaker": {
+      "max_consecutive_failures": 3
+    }
+  },
+  "intervention": {
+    "checkpoint": "between_phases",
+    "timeout_seconds": 3600
+  },
+  "states": [
+    {
+      "id": "DOMAIN_RESEARCH",
+      "type": "ai_session",
+      "prompt": "prompts/domain_research.md",
+      "allowed_tools": [
+        "WebSearch",
+        "WebFetch",
+        "Read",
+        "Write"
+      ],
+      "allowed_write_globs": [
+        "research/{iter}/.domain_research.json"
+      ],
+      "completion": {
+        "artifact": "research/{iter}/.domain_research.json",
+        "required_fields": [
+          "domain_type",
+          "sota_models",
+          "references"
+        ]
+      },
+      "next": "RELATED_WORK"
+    },
+    {
+      "id": "RELATED_WORK",
+      "type": "ai_session",
+      "prompt": "prompts/novel/related_work.md",
+      "allowed_tools": [
+        "WebSearch",
+        "WebFetch",
+        "Read",
+        "Write"
+      ],
+      "allowed_write_globs": [
+        "research/{iter}/.related_work.json"
+      ],
+      "completion": {
+        "artifact": "research/{iter}/.related_work.json",
+        "required_fields": [
+          "papers",
+          "limitations_of_existing",
+          "research_gap"
+        ]
+      },
+      "next": "DATA_DEEP_DIVE"
+    },
+    {
+      "id": "DATA_DEEP_DIVE",
+      "type": "ai_session",
+      "prompt": "prompts/data_deep_dive.md",
+      "allowed_tools": [
+        "Read",
+        "Bash",
+        "Write"
+      ],
+      "allowed_write_globs": [
+        "research/{iter}/.data_analysis.json"
+      ],
+      "completion": {
+        "artifact": "research/{iter}/.data_analysis.json",
+        "required_fields": [
+          "files",
+          "features"
+        ]
+      },
+      "next": "IDEA_REFINE"
+    },
+    {
+      "id": "IDEA_REFINE",
+      "type": "ai_session",
+      "prompt": "prompts/idea_refine.md",
+      "allowed_tools": [
+        "Read",
+        "Write"
+      ],
+      "interactive": true,
+      "interactive_fallback": "self_answer",
+      "allowed_write_globs": [
+        "research/{iter}/.idea_refined.json"
+      ],
+      "completion": {
+        "artifact": "research/{iter}/.idea_refined.json",
+        "required_fields": [
+          "goal",
+          "inputs",
+          "outputs",
+          "metric",
+          "novelty_claim"
+        ]
+      },
+      "next": "METHOD_DESIGN"
+    },
+    {
+      "id": "METHOD_DESIGN",
+      "type": "ai_session",
+      "prompt": "prompts/novel/method_design.md",
+      "allowed_tools": [
+        "Read",
+        "Write"
+      ],
+      "allowed_write_globs": [
+        "research/{iter}/.method_design.json"
+      ],
+      "completion": {
+        "artifact": "research/{iter}/.method_design.json",
+        "required_fields": [
+          "architecture",
+          "training_procedure",
+          "loss_function",
+          "theoretical_justification"
+        ]
+      },
+      "next": "PLAN"
+    },
+    {
+      "id": "PLAN",
+      "type": "ai_session",
+      "prompt": "prompts/plan.md",
+      "allowed_tools": [
+        "Read",
+        "Write"
+      ],
+      "allowed_write_globs": [
+        "research/{iter}/research_plan.json"
+      ],
+      "completion": {
+        "artifact": "research/{iter}/research_plan.json",
+        "required_fields": [
+          "name",
+          "phases"
+        ]
+      },
+      "next": "PLAN_REVIEW"
+    },
+    {
+      "id": "PLAN_REVIEW",
+      "type": "checkpoint",
+      "condition": {
+        "source": "research/.intervention.json",
+        "field": "action"
+      },
+      "next": {
+        "approve": "PHASE_SELECT",
+        "modify_plan": "PLAN",
+        "stop": "DONE"
+      }
+    },
+    {
+      "id": "PHASE_SELECT",
+      "type": "process",
+      "condition": {
+        "check": "has_pending_phases"
+      },
+      "next": {
+        "true": "PHASE_CODE",
+        "false": "REFLECT"
+      }
+    },
+    {
+      "id": "PHASE_CODE",
+      "type": "ai_session",
+      "prompt": "prompts/phase_code.md",
+      "allowed_tools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Bash"
+      ],
+      "allowed_write_globs": [
+        "research/{iter}/phases/*",
+        "shared/lib/*"
+      ],
+      "blocked_bash_patterns": [
+        "python research/*/phases/*"
+      ],
+      "context": [
+        "iter",
+        "current_phase",
+        "previous_results_summary"
+      ],
+      "completion": {
+        "artifact": "research/{iter}/phases/phase_*.py"
+      },
+      "error": {
+        "max_retries": 2,
+        "on_exhaust": "skip_phase"
+      },
+      "next": "PHASE_RUN"
+    },
+    {
+      "id": "PHASE_RUN",
+      "type": "process",
+      "blocked_write_globs": [
+        "research/{iter}/phases/*"
+      ],
+      "error": {
+        "max_retries": 1,
+        "on_exhaust": "ask"
+      },
+      "next": "PHASE_EVALUATE"
+    },
+    {
+      "id": "PHASE_EVALUATE",
+      "type": "process",
+      "error": {
+        "max_retries": 2,
+        "retry_to": "PHASE_CODE",
+        "on_exhaust": "skip_phase"
+      },
+      "next": "PHASE_RECORD"
+    },
+    {
+      "id": "PHASE_RECORD",
+      "type": "process",
+      "next": "CHECKPOINT"
+    },
+    {
+      "id": "CHECKPOINT",
+      "type": "checkpoint",
+      "condition": {
+        "source": "research/.intervention.json",
+        "field": "action"
+      },
+      "next": {
+        "approve": "PHASE_SELECT",
+        "modify_plan": "PLAN",
+        "skip_phase": "PHASE_SELECT",
+        "stop": "DONE"
+      }
+    },
+    {
+      "id": "REFLECT",
+      "type": "ai_session",
+      "prompt": "prompts/reflect.md",
+      "allowed_tools": [
+        "Read",
+        "Write"
+      ],
+      "allowed_write_globs": [
+        "research/{iter}/reflect.json"
+      ],
+      "completion": {
+        "artifact": "research/{iter}/reflect.json",
+        "required_fields": [
+          "decision",
+          "reason"
+        ]
+      },
+      "next": "PAPER_DRAFT"
+    },
+    {
+      "id": "PAPER_DRAFT",
+      "type": "ai_session",
+      "prompt": "prompts/novel/paper_draft.md",
+      "allowed_tools": [
+        "Read",
+        "Write"
+      ],
+      "allowed_write_globs": [
+        "research/{iter}/paper_draft.md"
+      ],
+      "completion": {
+        "artifact": "research/{iter}/paper_draft.md"
+      },
+      "next": "REFLECT_DONE"
+    },
+    {
+      "id": "REFLECT_DONE",
+      "type": "process",
+      "condition": {
+        "source": "{iter}/reflect.json",
+        "field": "decision"
+      },
+      "next": {
+        "done": "DONE",
+        "add_phases": "PLAN",
+        "idea_mutation": "IDEA_REFINE",
+        "domain_pivot": "DOMAIN_RESEARCH"
+      }
+    }
+  ]
+}

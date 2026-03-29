@@ -7,7 +7,6 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
-import yaml
 
 from tiny_lab.engine import Engine
 from tiny_lab.state import load_state, save_state, set_state, LoopState
@@ -22,8 +21,8 @@ def project_dir(tmp_path: Path) -> Path:
     (tmp_path / "shared").mkdir()
 
     # Copy preset
-    preset = Path(__file__).parent.parent.parent / "src" / "tiny_lab" / "presets" / "ml-experiment.yaml"
-    shutil.copy2(preset, rd / ".workflow.yaml")
+    preset = Path(__file__).parent.parent.parent / "src" / "tiny_lab" / "presets" / "ml-experiment.json"
+    shutil.copy2(preset, rd / ".workflow.json")
 
     return tmp_path
 
@@ -77,7 +76,7 @@ class TestPhaseSelect:
                 {"id": "phase_0", "status": "pending", "name": "prep", "depends_on": [], "type": "script"},
             ],
         }
-        (idir / "research_plan.yaml").write_text(yaml.dump(plan))
+        (idir / "research_plan.json").write_text(json.dumps(plan))
 
         save_state(project_dir, LoopState(state="PHASE_SELECT", current_iteration=1))
         engine = Engine(project_dir)
@@ -97,7 +96,7 @@ class TestPhaseSelect:
             "name": "test",
             "phases": [{"id": "phase_0", "status": "done", "depends_on": []}],
         }
-        (idir / "research_plan.yaml").write_text(yaml.dump(plan))
+        (idir / "research_plan.json").write_text(json.dumps(plan))
 
         save_state(project_dir, LoopState(state="PHASE_SELECT", current_iteration=1))
         engine = Engine(project_dir)
@@ -131,7 +130,7 @@ class TestPhaseRunScript:
             "name": "test",
             "phases": [{"id": "phase_0", "status": "running", "name": "test", "depends_on": [], "type": "script"}],
         }
-        (idir / "research_plan.yaml").write_text(yaml.dump(plan))
+        (idir / "research_plan.json").write_text(json.dumps(plan))
 
         save_state(project_dir, LoopState(state="PHASE_RUN", current_iteration=1, current_phase_id="phase_0"))
         engine = Engine(project_dir)
@@ -165,7 +164,7 @@ class TestPhaseEvaluate:
                 },
             }],
         }
-        (idir / "research_plan.yaml").write_text(yaml.dump(plan))
+        (idir / "research_plan.json").write_text(json.dumps(plan))
 
         save_state(project_dir, LoopState(state="PHASE_EVALUATE", current_iteration=1, current_phase_id="phase_0"))
         engine = Engine(project_dir)
@@ -178,8 +177,8 @@ class TestTryAdvance:
         idir = iter_dir(project_dir, 1)
         idir.mkdir(parents=True)
         # Write artifact
-        (idir / ".domain_research.yaml").write_text(
-            yaml.dump({"domain_type": "test", "sota_models": ["a"], "references": ["b"]})
+        (idir / ".domain_research.json").write_text(
+            json.dumps({"domain_type": "test", "sota_models": ["a"], "references": ["b"]})
         )
 
         save_state(project_dir, LoopState(state="DOMAIN_RESEARCH", current_iteration=1))
@@ -205,7 +204,7 @@ class TestTryAdvance:
     def test_does_not_advance_with_missing_fields(self, project_dir):
         idir = iter_dir(project_dir, 1)
         idir.mkdir(parents=True)
-        (idir / ".domain_research.yaml").write_text(yaml.dump({"domain_type": "test"}))  # missing fields
+        (idir / ".domain_research.json").write_text(json.dumps({"domain_type": "test"}))  # missing fields
 
         save_state(project_dir, LoopState(state="DOMAIN_RESEARCH", current_iteration=1))
         engine = Engine(project_dir)
@@ -229,12 +228,12 @@ class TestIterationManagement:
         engine = Engine(project_dir)
         idir1 = iter_dir(project_dir, 1)
         idir1.mkdir(parents=True)
-        (idir1 / ".domain_research.yaml").write_text("domain: test")
-        (idir1 / ".data_analysis.yaml").write_text("data: test")
+        (idir1 / ".domain_research.json").write_text("domain: test")
+        (idir1 / ".data_analysis.json").write_text("data: test")
 
         engine._create_iteration(2)
         engine._carry_over(1, 2, "IDEA_REFINE")
 
         idir2 = iter_dir(project_dir, 2)
-        assert (idir2 / ".domain_research.yaml").exists()
-        assert (idir2 / ".data_analysis.yaml").exists()
+        assert (idir2 / ".domain_research.json").exists()
+        assert (idir2 / ".data_analysis.json").exists()

@@ -4,7 +4,7 @@ Current iteration: {iter}
 
 ## Context
 
-Read research/{iter}/.paper_analysis.yaml for themes, comparisons, and gaps.
+Read research/{iter}/.paper_analysis.json for themes, comparisons, and gaps.
 
 ## Your Task
 
@@ -16,7 +16,7 @@ Organize the analyzed papers into a structured taxonomy:
 
 ## Output
 
-Write to research/{iter}/.taxonomy.yaml:
+Write to research/{iter}/.taxonomy.json:
 
 - categories: hierarchical category structure
 - classification_criteria: what dimensions are used

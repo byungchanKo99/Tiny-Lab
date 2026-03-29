@@ -1,16 +1,15 @@
 """Workflow definition parser and validator.
 
-workflow.yaml defines the state machine: states, transitions, allowed
+workflow.json defines the state machine: states, transitions, allowed
 tools, completion conditions, and error handling. This module parses
 it into typed dataclasses and validates the graph.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-
-import yaml
 
 from .errors import WorkflowError
 
@@ -23,7 +22,7 @@ from .errors import WorkflowError
 class CompletionSpec:
     """What artifact must be produced to complete a state."""
 
-    artifact: str  # glob pattern, e.g. "research/{iter}/.domain_research.yaml"
+    artifact: str  # glob pattern, e.g. "research/{iter}/.domain_research.json"
     required_fields: list[str] = field(default_factory=list)
 
 
@@ -187,7 +186,7 @@ def load_workflow(path: Path) -> Workflow:
     if not path.exists():
         raise WorkflowError(f"Workflow file not found: {path}")
 
-    data = yaml.safe_load(path.read_text())
+    data = json.loads(path.read_text())
     if not data or "states" not in data:
         raise WorkflowError("Workflow must have 'states' list")
 

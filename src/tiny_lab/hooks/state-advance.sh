@@ -4,7 +4,7 @@
 # When AI writes the completion artifact for the current state,
 # this hook validates required fields and transitions to the next state.
 
-WORKFLOW="research/.workflow.yaml"
+WORKFLOW="research/.workflow.json"
 STATE_FILE="research/.state.json"
 
 # Skip if not initialized
@@ -22,11 +22,11 @@ WRITTEN_FILE="${CLAUDE_TOOL_INPUT_FILE_PATH:-}"
 [[ -z "$WRITTEN_FILE" ]] && exit 0
 
 python3 << PYEOF
-import yaml, json, sys, glob as g
+import json, sys, glob as g
 from pathlib import Path
 
 try:
-    wf = yaml.safe_load(open("$WORKFLOW"))
+    wf = json.load(open("$WORKFLOW"))
 except Exception:
     sys.exit(0)
 
@@ -56,7 +56,7 @@ if not (fnmatch.fnmatch(written, resolved) or
 required = comp.get("required_fields", [])
 if required:
     try:
-        data = yaml.safe_load(Path(written).read_text())
+        data = json.loads(Path(written).read_text())
         if not isinstance(data, dict):
             print(f"Completion artifact is not a dict: {written}")
             sys.exit(0)  # Don't block, just don't advance

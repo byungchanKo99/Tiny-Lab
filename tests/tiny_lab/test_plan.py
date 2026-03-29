@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import yaml
+import json
 
 from tiny_lab.errors import PlanError
 from tiny_lab.plan import load_plan, pending_phases, next_pending_phase, update_phase_status
@@ -22,7 +22,7 @@ def plan_dir(tmp_path: Path) -> Path:
             {"id": "p2", "status": "pending", "depends_on": ["p0", "p1"], "type": "optimize"},
         ],
     }
-    (tmp_path / "research" / "iter_1" / "research_plan.yaml").write_text(yaml.dump(plan))
+    (tmp_path / "research" / "iter_1" / "research_plan.json").write_text(json.dumps(plan))
     return tmp_path
 
 

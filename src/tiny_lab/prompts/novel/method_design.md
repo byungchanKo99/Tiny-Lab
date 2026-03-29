@@ -6,10 +6,10 @@ Current iteration: {iter}
 
 Read all prior artifacts:
 
-- research/{iter}/.domain_research.yaml — SOTA
-- research/{iter}/.related_work.yaml — limitations and gap
-- research/{iter}/.data_analysis.yaml — data characteristics
-- research/{iter}/.idea_refined.yaml — concrete goal and novelty claim
+- research/{iter}/.domain_research.json — SOTA
+- research/{iter}/.related_work.json — limitations and gap
+- research/{iter}/.data_analysis.json — data characteristics
+- research/{iter}/.idea_refined.json — concrete goal and novelty claim
 
 ## Your Task
 
@@ -24,7 +24,7 @@ Be specific — include dimensions, layer types, mathematical formulations where
 
 ## Output
 
-Write to research/{iter}/.method_design.yaml:
+Write to research/{iter}/.method_design.json:
 
 - architecture: detailed architecture description
 - training_procedure: optimizer, learning rate, batch size, epochs

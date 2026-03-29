@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-import yaml
+import json
 
 from . import events
 from .conditions import resolve_condition
@@ -164,8 +164,13 @@ class Engine:
             self._try_advance(spec, ls)
             new_ls = load_state(self.project_dir)
             if new_ls.state == ls.state:
-                # Still didn't advance — artifact not created or invalid
-                raise StateError(f"Claude session for {spec.id} did not produce expected artifact")
+                # Check if artifact exists but has invalid JSON — ask Claude to fix
+                if spec.completion and self._try_fix_json(spec, ls):
+                    self._try_advance(spec, ls)
+                    new_ls = load_state(self.project_dir)
+
+                if new_ls.state == ls.state:
+                    raise StateError(f"Claude session for {spec.id} did not produce expected artifact")
 
     def _handle_process(self, spec: StateSpec, ls: LoopState) -> None:
         """Handle a process state (no AI needed)."""
@@ -226,7 +231,7 @@ class Engine:
 
     def _process_intervention(self, spec: StateSpec, ls: LoopState, ipath: Path) -> None:
         """Read and apply an intervention file."""
-        intervention = yaml.safe_load(ipath.read_text())
+        intervention = json.loads(ipath.read_text())
         ipath.unlink()
         action = intervention.get("action", "approve")
         log(f"ENGINE: intervention received: {action}")
@@ -296,10 +301,9 @@ class Engine:
         elif phase_type == "manual":
             log(f"ENGINE: phase {phase_id} is manual — waiting for intervention")
             # Write a marker so the intervention knows what phase is waiting
-            import yaml as _yaml
             marker = {"phase_id": phase_id, "phase_name": phase.get("name", ""), "waiting_for": "manual input"}
-            (intervention_path(self.project_dir).parent / ".manual_wait.yaml").write_text(
-                _yaml.dump(marker, default_flow_style=False)
+            (intervention_path(self.project_dir).parent / ".manual_wait.json").write_text(
+                json.dumps(marker, indent=2)
             )
             # Transition to CHECKPOINT to wait for intervention
             set_state(self.project_dir, "CHECKPOINT")
@@ -346,7 +350,6 @@ class Engine:
 
     def _run_phase_optimize(self, phase: dict[str, Any], ls: LoopState) -> None:
         """Run an optimize-type phase using the optimizer inner loop."""
-        import json
         from .optimize import run_optimize
 
         phase_id = phase["id"]
@@ -413,9 +416,7 @@ class Engine:
 
         schema = report_spec.get("schema", {})
         if schema:
-            import json
-            data = json.loads(report_path.read_text()) if report_path.suffix == ".json" \
-                else yaml.safe_load(report_path.read_text())
+            data = json.loads(report_path.read_text())
             missing = [k for k in schema if k not in data]
             if missing:
                 raise StateError(f"Report missing fields: {missing}")
@@ -530,6 +531,48 @@ class Engine:
                 return f"{{{key}}}"
         return template.format_map(SafeDict(context))
 
+    def _try_fix_json(self, spec: StateSpec, ls: LoopState) -> bool:
+        """If artifact exists but is invalid JSON, ask Claude to fix it. Returns True if fixed."""
+        import glob as g
+        pattern = spec.completion.artifact.replace("{iter}", f"iter_{ls.current_iteration}")
+        full_pattern = str(self.project_dir / pattern)
+        matches = g.glob(full_pattern)
+        if not matches:
+            return False
+
+        artifact_path = Path(matches[0])
+        try:
+            json.loads(artifact_path.read_text())
+            return False  # Already valid JSON
+        except json.JSONDecodeError as e:
+            log(f"ENGINE: artifact {artifact_path.name} has invalid JSON: {e}")
+            log(f"ENGINE: asking Claude to fix...")
+
+            fix_prompt = (
+                f"The file {artifact_path} contains invalid JSON.\n"
+                f"Error: {e}\n\n"
+                f"Read the file, fix the JSON syntax error, and write it back as valid JSON.\n"
+                f"Do NOT change the content — only fix the syntax."
+            )
+
+            fix_result = subprocess.run(
+                ["claude", "-p", fix_prompt, "--allowedTools", "Read,Write,Edit"],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                cwd=str(self.project_dir),
+                timeout=120,
+            )
+
+            # Check if fixed
+            try:
+                json.loads(artifact_path.read_text())
+                log(f"ENGINE: JSON fixed successfully")
+                return True
+            except json.JSONDecodeError:
+                log(f"ENGINE: JSON fix attempt failed")
+                return False
+
     def _try_advance(self, spec: StateSpec, ls: LoopState) -> None:
         """Try to advance state if completion artifact exists."""
         if not spec.completion:
@@ -547,8 +590,8 @@ class Engine:
         # Validate required fields
         if spec.completion.required_fields:
             try:
-                data = yaml.safe_load(Path(matches[0]).read_text())
-            except yaml.YAMLError:
+                data = json.loads(Path(matches[0]).read_text())
+            except json.JSONDecodeError:
                 # AI-generated YAML may have syntax errors — advance anyway
                 # since the artifact file exists (content will be consumed by next state)
                 log(f"ENGINE: _try_advance — YAML parse warning in {matches[0]}, advancing anyway")
@@ -586,9 +629,9 @@ class Engine:
         dst = iter_dir(self.project_dir, to_iter)
 
         carry_map = {
-            "DATA_DEEP_DIVE": [".domain_research.yaml"],
-            "IDEA_REFINE": [".domain_research.yaml", ".data_analysis.yaml"],
-            "PLAN": [".domain_research.yaml", ".data_analysis.yaml", ".idea_refined.yaml"],
+            "DATA_DEEP_DIVE": [".domain_research.json"],
+            "IDEA_REFINE": [".domain_research.json", ".data_analysis.json"],
+            "PLAN": [".domain_research.json", ".data_analysis.json", ".idea_refined.json"],
         }
 
         files = carry_map.get(entry_state, [])
@@ -598,24 +641,24 @@ class Engine:
                 shutil.copy2(src_file, dst / fname)
                 log(f"ENGINE: carried over {fname} to iter_{to_iter}")
 
-        # Update iterations.yaml
+        # Update iterations.json
         self._update_iterations_log(from_iter)
 
     def _update_iterations_log(self, completed_iter: int) -> None:
-        """Append completed iteration to .iterations.yaml."""
+        """Append completed iteration to .iterations.json."""
         from .paths import iterations_path
         ipath = iterations_path(self.project_dir)
 
         data = {"current_iteration": completed_iter + 1, "iterations": []}
         if ipath.exists():
-            data = yaml.safe_load(ipath.read_text()) or data
+            data = json.loads(ipath.read_text()) or data
 
-        # Read reflect.yaml for the completed iteration
+        # Read reflect.json for the completed iteration
         from .paths import reflect_path
         rpath = reflect_path(self.project_dir, completed_iter)
         reflect: dict[str, Any] = {}
         if rpath.exists():
-            reflect = yaml.safe_load(rpath.read_text()) or {}
+            reflect = json.loads(rpath.read_text()) or {}
 
         entry = {
             "id": completed_iter,
@@ -624,4 +667,4 @@ class Engine:
         }
         data["iterations"].append(entry)
         data["current_iteration"] = completed_iter + 1
-        ipath.write_text(yaml.dump(data, default_flow_style=False, allow_unicode=True))
+        ipath.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")

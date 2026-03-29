@@ -4,7 +4,7 @@ Current iteration: {iter}
 
 ## Context
 
-Read research/{iter}/.scope.yaml for research questions, inclusion/exclusion criteria, and search terms.
+Read research/{iter}/.scope.json for research questions, inclusion/exclusion criteria, and search terms.
 
 ## Your Task
 
@@ -24,11 +24,11 @@ For each paper found:
 
 ## Screening
 
-Apply inclusion/exclusion criteria from scope.yaml to filter papers.
+Apply inclusion/exclusion criteria from scope.json to filter papers.
 
 ## Output
 
-Write to research/{iter}/.papers_collected.yaml:
+Write to research/{iter}/.papers_collected.json:
 
 - papers: list of accepted papers (title, authors, year, venue, url, relevance_summary)
 - total_found: total papers discovered

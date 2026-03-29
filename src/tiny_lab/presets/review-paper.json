@@ -1,0 +1,154 @@
+{
+  "autonomy": {
+    "mode": "supervised",
+    "max_iterations": 3,
+    "allow_idea_mutation": false,
+    "stop_on_target": false,
+    "circuit_breaker": {
+      "max_consecutive_failures": 3
+    }
+  },
+  "intervention": {
+    "checkpoint": "between_phases",
+    "timeout_seconds": 7200
+  },
+  "states": [
+    {
+      "id": "SCOPE_DEFINITION",
+      "type": "ai_session",
+      "prompt": "prompts/review/scope.md",
+      "allowed_tools": [
+        "Read",
+        "Write"
+      ],
+      "allowed_write_globs": [
+        "research/{iter}/.scope.json"
+      ],
+      "completion": {
+        "artifact": "research/{iter}/.scope.json",
+        "required_fields": [
+          "research_questions",
+          "inclusion_criteria",
+          "exclusion_criteria"
+        ]
+      },
+      "next": "LITERATURE_SEARCH"
+    },
+    {
+      "id": "LITERATURE_SEARCH",
+      "type": "ai_session",
+      "prompt": "prompts/review/literature_search.md",
+      "allowed_tools": [
+        "WebSearch",
+        "WebFetch",
+        "Read",
+        "Write"
+      ],
+      "allowed_write_globs": [
+        "research/{iter}/.papers_collected.json"
+      ],
+      "completion": {
+        "artifact": "research/{iter}/.papers_collected.json",
+        "required_fields": [
+          "papers",
+          "total_found",
+          "after_screening"
+        ]
+      },
+      "error": {
+        "max_retries": 2,
+        "on_exhaust": "ask"
+      },
+      "next": "PAPER_ANALYSIS"
+    },
+    {
+      "id": "PAPER_ANALYSIS",
+      "type": "ai_session",
+      "prompt": "prompts/review/analysis.md",
+      "allowed_tools": [
+        "Read",
+        "Write"
+      ],
+      "allowed_write_globs": [
+        "research/{iter}/.paper_analysis.json"
+      ],
+      "completion": {
+        "artifact": "research/{iter}/.paper_analysis.json",
+        "required_fields": [
+          "themes",
+          "comparisons",
+          "gaps"
+        ]
+      },
+      "next": "TAXONOMY"
+    },
+    {
+      "id": "TAXONOMY",
+      "type": "ai_session",
+      "prompt": "prompts/review/taxonomy.md",
+      "allowed_tools": [
+        "Read",
+        "Write"
+      ],
+      "allowed_write_globs": [
+        "research/{iter}/.taxonomy.json"
+      ],
+      "completion": {
+        "artifact": "research/{iter}/.taxonomy.json",
+        "required_fields": [
+          "categories",
+          "classification_criteria"
+        ]
+      },
+      "next": "SYNTHESIS"
+    },
+    {
+      "id": "SYNTHESIS",
+      "type": "ai_session",
+      "prompt": "prompts/review/synthesis.md",
+      "allowed_tools": [
+        "Read",
+        "Write"
+      ],
+      "allowed_write_globs": [
+        "research/{iter}/review_draft.md"
+      ],
+      "completion": {
+        "artifact": "research/{iter}/review_draft.md"
+      },
+      "next": "REFLECT"
+    },
+    {
+      "id": "REFLECT",
+      "type": "ai_session",
+      "prompt": "prompts/reflect.md",
+      "allowed_tools": [
+        "Read",
+        "Write"
+      ],
+      "allowed_write_globs": [
+        "research/{iter}/reflect.json"
+      ],
+      "completion": {
+        "artifact": "research/{iter}/reflect.json",
+        "required_fields": [
+          "decision",
+          "reason"
+        ]
+      },
+      "next": "REFLECT_DONE"
+    },
+    {
+      "id": "REFLECT_DONE",
+      "type": "process",
+      "condition": {
+        "source": "{iter}/reflect.json",
+        "field": "decision"
+      },
+      "next": {
+        "done": "DONE",
+        "more_search": "LITERATURE_SEARCH"
+      }
+    }
+  ]
+}

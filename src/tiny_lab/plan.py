@@ -1,25 +1,24 @@
 """Research plan parser.
 
-research_plan.yaml defines WHAT experiments to run (phases, methodology,
+research_plan.json defines WHAT experiments to run (phases, methodology,
 expected outputs). This module parses and queries it.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
-
-import yaml
 
 from .errors import PlanError
 from .paths import plan_path
 
 
 def load_plan(project_dir: Path, iteration: int) -> dict[str, Any]:
-    """Load research_plan.yaml for a given iteration."""
+    """Load research_plan.json for a given iteration."""
     path = plan_path(project_dir, iteration)
     if not path.exists():
         raise PlanError(f"Research plan not found: {path}")
-    data = yaml.safe_load(path.read_text())
+    data = json.loads(path.read_text())
     if not data or "phases" not in data:
         raise PlanError("Research plan must have 'phases' list")
     return data
@@ -51,9 +50,9 @@ def update_phase_status(
 ) -> None:
     """Update a phase's status in the plan file."""
     path = plan_path(project_dir, iteration)
-    data = yaml.safe_load(path.read_text())
+    data = json.loads(path.read_text())
     for phase in data.get("phases", []):
         if phase["id"] == phase_id:
             phase["status"] = status
             break
-    path.write_text(yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False))
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")

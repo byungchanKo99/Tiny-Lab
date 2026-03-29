@@ -1,10 +1,10 @@
-"""Tests for workflow.yaml parser and validator."""
+"""Tests for workflow.json parser and validator."""
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
-import yaml
+import json
 
 from tiny_lab.errors import WorkflowError
 from tiny_lab.workflow import load_workflow, validate_workflow, Workflow, StateSpec
@@ -14,8 +14,8 @@ from tiny_lab.workflow import load_workflow, validate_workflow, Workflow, StateS
 def tmp_workflow(tmp_path: Path):
     """Helper to write a workflow YAML and return path."""
     def _write(data: dict) -> Path:
-        path = tmp_path / "workflow.yaml"
-        path.write_text(yaml.dump(data, default_flow_style=False))
+        path = tmp_path / "workflow.json"
+        path.write_text(json.dumps(data, indent=2))
         return path
     return _write
 
@@ -33,7 +33,7 @@ class TestLoadWorkflow:
 
     def test_missing_file(self, tmp_path):
         with pytest.raises(WorkflowError, match="not found"):
-            load_workflow(tmp_path / "nope.yaml")
+            load_workflow(tmp_path / "nope.json")
 
     def test_no_states(self, tmp_workflow):
         path = tmp_workflow({"autonomy": {"mode": "autonomous"}})
@@ -42,7 +42,7 @@ class TestLoadWorkflow:
 
     def test_full_preset(self):
         """ml-experiment preset loads without error."""
-        path = Path(__file__).parent.parent.parent / "src" / "tiny_lab" / "presets" / "ml-experiment.yaml"
+        path = Path(__file__).parent.parent.parent / "src" / "tiny_lab" / "presets" / "ml-experiment.json"
         if path.exists():
             wf = load_workflow(path)
             assert len(wf.states) > 10
@@ -77,7 +77,7 @@ class TestLoadWorkflow:
             "states": [{
                 "id": "A", "type": "ai_session", "next": "DONE",
                 "completion": {
-                    "artifact": "research/{iter}/.out.yaml",
+                    "artifact": "research/{iter}/.out.json",
                     "required_fields": ["x", "y"],
                 },
             }],
@@ -85,7 +85,7 @@ class TestLoadWorkflow:
         wf = load_workflow(path)
         comp = wf.get_state("A").completion
         assert comp is not None
-        assert comp.artifact == "research/{iter}/.out.yaml"
+        assert comp.artifact == "research/{iter}/.out.json"
         assert comp.required_fields == ["x", "y"]
 
     def test_error_spec_parsing(self, tmp_workflow):
@@ -106,14 +106,14 @@ class TestLoadWorkflow:
         path = tmp_workflow({
             "states": [{
                 "id": "A", "type": "process",
-                "condition": {"source": "reflect.yaml", "field": "decision"},
+                "condition": {"source": "reflect.json", "field": "decision"},
                 "next": {"done": "DONE", "retry": "A"},
             }],
         })
         wf = load_workflow(path)
         cond = wf.get_state("A").condition
         assert cond is not None
-        assert cond.source == "reflect.yaml"
+        assert cond.source == "reflect.json"
         assert cond.field == "decision"
 
 

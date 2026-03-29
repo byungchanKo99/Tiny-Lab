@@ -7,13 +7,13 @@ Project directory: {project_dir}
 
 Read all three understanding artifacts:
 
-- research/{iter}/.domain_research.yaml — SOTA, preprocessing, metrics, pitfalls
-- research/{iter}/.data_analysis.yaml — data characteristics, quality issues
-- research/{iter}/.idea_refined.yaml — concrete goal, inputs, outputs, metric, constraints
+- research/{iter}/.domain_research.json — SOTA, preprocessing, metrics, pitfalls
+- research/{iter}/.data_analysis.json — data characteristics, quality issues
+- research/{iter}/.idea_refined.json — concrete goal, inputs, outputs, metric, constraints
 
 ## Your Task
 
-Create research/{iter}/research_plan.yaml — the execution blueprint.
+Create research/{iter}/research_plan.json — the execution blueprint.
 
 ## Plan structure
 
@@ -71,4 +71,4 @@ Not all phases are needed. The domain research and idea determine which are rele
 
 ## Write the plan
 
-Write to research/{iter}/research_plan.yaml with at least: name, phases (each with id, name, why, type, methodology, expected_outputs, status).
+Write to research/{iter}/research_plan.json with at least: name, phases (each with id, name, why, type, methodology, expected_outputs, status).
