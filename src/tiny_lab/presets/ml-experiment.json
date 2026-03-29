@@ -24,7 +24,7 @@
         "required_fields": ["domain_type", "sota_models", "references"]
       },
       "error": {
-        "max_retries": 2,
+        "max_retries": 10,
         "on_exhaust": "skip"
       },
       "next": "DATA_DEEP_DIVE"
@@ -40,7 +40,7 @@
         "required_fields": ["files", "features"]
       },
       "error": {
-        "max_retries": 2,
+        "max_retries": 10,
         "on_exhaust": "skip"
       },
       "next": "IDEA_REFINE"
@@ -57,6 +57,10 @@
         "artifact": "research/{iter}/.idea_refined.json",
         "required_fields": ["goal", "inputs", "outputs", "metric"]
       },
+      "error": {
+        "max_retries": 10,
+        "on_exhaust": "stop"
+      },
       "next": "PLAN"
     },
     {
@@ -69,6 +73,10 @@
       "completion": {
         "artifact": "research/{iter}/research_plan.json",
         "required_fields": ["name", "phases"]
+      },
+      "error": {
+        "max_retries": 10,
+        "on_exhaust": "stop"
       },
       "next": "PLAN_REVIEW"
     },
@@ -109,7 +117,7 @@
         "artifact": "research/{iter}/phases/phase_*.py"
       },
       "error": {
-        "max_retries": 2,
+        "max_retries": 10,
         "on_exhaust": "skip_phase"
       },
       "next": "PHASE_RUN"
@@ -166,7 +174,7 @@
         "artifact": "research/{iter}/paper_draft.md"
       },
       "error": {
-        "max_retries": 1,
+        "max_retries": 10,
         "on_exhaust": "skip"
       },
       "next": "REFLECT"

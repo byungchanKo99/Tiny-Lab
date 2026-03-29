@@ -63,19 +63,31 @@ class AiSessionHandler:
             return StateResult()  # already transitioned
 
         # Try advancing via artifact detection
-        _try_advance(spec, ls, ctx)
+        problem = _try_advance(spec, ls, ctx)
         new_ls = load_state(ctx.project_dir)
         if new_ls.state != ls.state:
             return StateResult()
 
         # Try fixing invalid JSON
         if spec.completion and _try_fix_json(spec, ls, ctx):
-            _try_advance(spec, ls, ctx)
+            problem = _try_advance(spec, ls, ctx)
             new_ls = load_state(ctx.project_dir)
             if new_ls.state != ls.state:
                 return StateResult()
 
-        raise StateError(f"Claude session for {spec.id} did not produce expected artifact")
+        # Artifact exists but validation failed — ask Claude to fix it
+        if problem and spec.completion:
+            log(f"ENGINE: artifact validation issue: {problem}")
+            if _try_fix_artifact(spec, ls, ctx, problem):
+                problem = _try_advance(spec, ls, ctx)
+                new_ls = load_state(ctx.project_dir)
+                if new_ls.state != ls.state:
+                    return StateResult()
+
+        raise StateError(
+            f"Claude session for {spec.id} did not produce expected artifact"
+            + (f" ({problem})" if problem else "")
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -199,17 +211,20 @@ def _update_session_id(stdout: str, ctx: EngineContext) -> None:
         pass
 
 
-def _try_advance(spec: StateSpec, ls: LoopState, ctx: EngineContext) -> None:
-    """Advance state if completion artifact exists and validates."""
+def _try_advance(spec: StateSpec, ls: LoopState, ctx: EngineContext) -> str | None:
+    """Advance state if completion artifact exists and validates.
+
+    Returns None on success, or a problem description if validation fails.
+    """
     if not spec.completion:
-        return
+        return None
 
     pattern = spec.completion.artifact.replace("{iter}", f"iter_{ls.current_iteration}")
     full_pattern = str(ctx.project_dir / pattern)
     matches = g.glob(full_pattern)
     log(f"ENGINE: _try_advance — pattern={full_pattern}, matches={len(matches)}")
     if not matches:
-        return
+        return "artifact file not found"
 
     if spec.completion.required_fields:
         try:
@@ -218,16 +233,65 @@ def _try_advance(spec: StateSpec, ls: LoopState, ctx: EngineContext) -> None:
             if isinstance(spec.next, str):
                 set_state(ctx.project_dir, spec.next)
                 log(f"ENGINE: advanced {ls.state} → {spec.next} (with JSON warning)")
-            return
+            return None
         if not isinstance(data, dict):
-            return
+            return f"artifact is not a JSON object (got {type(data).__name__})"
         missing = [f for f in spec.completion.required_fields if f not in data]
         if missing:
-            return
+            actual_keys = list(data.keys())
+            return f"missing required fields {missing}, file has: {actual_keys}"
 
     if isinstance(spec.next, str):
         set_state(ctx.project_dir, spec.next)
         log(f"ENGINE: advanced {ls.state} → {spec.next}")
+    return None
+
+
+def _try_fix_artifact(spec: StateSpec, ls: LoopState, ctx: EngineContext, problem: str) -> bool:
+    """Ask Claude to fix an artifact that has validation issues (e.g. missing fields)."""
+    pattern = spec.completion.artifact.replace("{iter}", f"iter_{ls.current_iteration}")
+    full_pattern = str(ctx.project_dir / pattern)
+    matches = g.glob(full_pattern)
+    if not matches:
+        return False
+
+    artifact_path = Path(matches[0])
+    fix_prompt = (
+        f"The file {artifact_path} was created but has a validation problem:\n"
+        f"{problem}\n\n"
+        f"Required fields: {spec.completion.required_fields}\n\n"
+        f"Read the file and fix it. Common issues:\n"
+        f"- 'metrics' (plural) should be 'metric' (singular) or vice versa\n"
+        f"- Missing a required top-level key\n"
+        f"- Key exists under a nested object instead of top level\n\n"
+        f"Fix the JSON file in place. Do NOT change the content — only rename/restructure keys."
+    )
+    log(f"ENGINE: asking Claude to fix artifact: {problem}")
+
+    cmd = ["claude", "-p", fix_prompt, "--allowedTools", "Read,Write,Edit"]
+    if ls.session_id:
+        cmd.extend(["--resume", ls.session_id])
+    subprocess.run(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        cwd=str(ctx.project_dir),
+        timeout=120,
+    )
+
+    # Verify fix
+    try:
+        data = json.loads(artifact_path.read_text())
+        if isinstance(data, dict):
+            missing = [f for f in spec.completion.required_fields if f not in data]
+            if not missing:
+                log("ENGINE: artifact fix successful")
+                return True
+    except Exception:
+        pass
+    log("ENGINE: artifact fix failed")
+    return False
 
 
 def _try_fix_json(spec: StateSpec, ls: LoopState, ctx: EngineContext) -> bool:
