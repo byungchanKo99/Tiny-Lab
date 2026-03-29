@@ -11,6 +11,7 @@ from .phase import (
     PhaseEvaluateHandler,
     PhaseRecordHandler,
 )
+from .reflect import ReflectDoneHandler
 
 
 def base_registry() -> HandlerRegistry:
@@ -36,4 +37,5 @@ def research_registry() -> HandlerRegistry:
     reg.on_id("PHASE_RUN", PhaseRunHandler())
     reg.on_id("PHASE_EVALUATE", PhaseEvaluateHandler())
     reg.on_id("PHASE_RECORD", PhaseRecordHandler())
+    reg.on_id("REFLECT_DONE", ReflectDoneHandler())
     return reg
