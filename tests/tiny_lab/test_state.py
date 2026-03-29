@@ -33,6 +33,20 @@ class TestState:
         loaded = load_state(tmp_path)
         assert loaded.state == "DOMAIN_RESEARCH"
 
+    def test_session_id_persists(self, tmp_path):
+        (tmp_path / "research").mkdir()
+        ls = LoopState(state="PHASE_CODE", session_id="abc-123")
+        save_state(tmp_path, ls)
+        loaded = load_state(tmp_path)
+        assert loaded.session_id == "abc-123"
+
+    def test_session_id_cleared_via_set_state(self, tmp_path):
+        (tmp_path / "research").mkdir()
+        save_state(tmp_path, LoopState(state="PHASE_CODE", session_id="abc-123"))
+        set_state(tmp_path, "PHASE_SELECT", session_id=None)
+        loaded = load_state(tmp_path)
+        assert loaded.session_id is None
+
     def test_corrupt_state_file(self, tmp_path):
         rd = tmp_path / "research"
         rd.mkdir()

@@ -41,7 +41,7 @@ class PhaseSelectHandler:
             events.phase_started(ctx.project_dir, phase_id, ls.current_iteration)
             log(f"ENGINE: selected phase {phase_id} — {phase.get('name', '')}")
             return StateResult(
-                state_overrides={"current_phase_id": phase_id, "phase_retries": 0},
+                state_overrides={"current_phase_id": phase_id, "phase_retries": 0, "session_id": None},
             )
         else:
             log("ENGINE: no pending phases")

@@ -158,7 +158,7 @@ class Engine:
         if on_exhaust == "skip_phase" and ls.current_phase_id:
             log(f"ENGINE: skipping phase {ls.current_phase_id}")
             update_phase_status(self.project_dir, ls.current_iteration, ls.current_phase_id, "skipped")
-            set_state(self.project_dir, "PHASE_SELECT", current_phase_id=None, phase_retries=0)
+            set_state(self.project_dir, "PHASE_SELECT", current_phase_id=None, phase_retries=0, session_id=None)
         elif on_exhaust == "ask":
             log("ENGINE: waiting for intervention after error")
             set_state(self.project_dir, "CHECKPOINT")

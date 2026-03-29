@@ -4,6 +4,7 @@ from __future__ import annotations
 import glob as g
 import json
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,7 @@ from ..errors import StateError
 from ..logging import log
 from ..paths import results_dir, iter_dir
 from ..plan import load_plan
-from ..state import LoopState, load_state, set_state
+from ..state import LoopState, load_state, save_state, set_state
 from ..workflow import StateSpec
 from . import EngineContext, StateResult
 
@@ -23,9 +24,20 @@ class AiSessionHandler:
         context = _build_context(spec, ls, ctx)
         prompt = _render_prompt(spec, context, ctx)
 
-        cmd = ["claude", "-p", prompt]
+        cmd = ["claude", "-p", prompt, "--output-format", "json"]
         if spec.allowed_tools:
             cmd.extend(["--allowedTools", ",".join(spec.allowed_tools)])
+
+        # Session resume: reuse session within same phase retries
+        if ls.session_id:
+            cmd.extend(["--resume", ls.session_id])
+            log(f"ENGINE: resuming session {ls.session_id[:8]}…")
+        else:
+            session_id = str(uuid.uuid4())
+            cmd.extend(["--session-id", session_id])
+            ls.session_id = session_id
+            save_state(ctx.project_dir, ls)
+            log(f"ENGINE: new session {session_id[:8]}…")
 
         log(f"ENGINE: running Claude session for {spec.id}")
         result = subprocess.run(
@@ -36,6 +48,9 @@ class AiSessionHandler:
             cwd=str(ctx.project_dir),
             timeout=1800,
         )
+
+        # Extract session_id from JSON output (may change on resume)
+        _update_session_id(result.stdout, ctx)
 
         log(f"ENGINE: Claude session finished (exit={result.returncode})")
         if result.returncode != 0 and result.stderr:
@@ -166,6 +181,22 @@ def _render_prompt(spec: StateSpec, context: dict[str, Any], ctx: EngineContext)
 # ---------------------------------------------------------------------------
 # Artifact detection and JSON repair
 # ---------------------------------------------------------------------------
+
+
+def _update_session_id(stdout: str, ctx: EngineContext) -> None:
+    """Extract session_id from JSON output and persist it."""
+    if not stdout:
+        return
+    try:
+        data = json.loads(stdout)
+        sid = data.get("session_id")
+        if sid:
+            ls = load_state(ctx.project_dir)
+            if ls.session_id != sid:
+                ls.session_id = sid
+                save_state(ctx.project_dir, ls)
+    except (json.JSONDecodeError, KeyError):
+        pass
 
 
 def _try_advance(spec: StateSpec, ls: LoopState, ctx: EngineContext) -> None:
