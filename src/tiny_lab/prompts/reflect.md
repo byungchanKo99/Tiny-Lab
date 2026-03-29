@@ -24,7 +24,55 @@ For each completed phase:
 - What patterns emerge across phases?
 - Any unexpected discoveries?
 
-## Step 2: Evaluate against goal
+## Step 2: Domain-aware diagnosis
+
+For every underperforming result, do root cause analysis:
+
+- **Data issues**: distribution shift, feature mismatch, sampling rate differences, missing modalities
+- **Model issues**: insufficient capacity, wrong inductive bias, optimization failure
+- **Evaluation issues**: metric mismatch, unfair comparison, data leakage
+
+Output format:
+
+```
+Performance gap: [metric] = [actual] vs [target]
+Root cause: [data/model/evaluation] — [specific explanation]
+Evidence: [what in the results supports this diagnosis]
+Suggested fix: [concrete action for next iteration]
+```
+
+## Step 3: Missing experiments check
+
+Review what was done vs what SHOULD have been done:
+
+- Is there a non-ML baseline? If not, flag it.
+- Are there enough baselines for fair comparison?
+- Is there ablation / feature importance analysis?
+- Are results reported with std/CI, not just mean?
+- Is there cross-validation or only a single split?
+- Is there error analysis (where does the model fail)?
+- Is there domain shift analysis (if multiple data sources)?
+
+List missing experiments as concrete phase proposals.
+
+## Step 4: Contribution assessment
+
+Based on the results, what can we claim?
+
+- What is genuinely new compared to prior work (from .domain_research.json)?
+- What is the strongest result that no prior work has shown?
+- Is the contribution methodological, empirical, or analytical?
+
+Draft 2-3 contribution bullets:
+
+```
+This work contributes:
+1. [First/Novel] [specific claim] achieving [metric]
+2. [Systematic/Comprehensive] [analysis type] revealing [insight]
+3. [Practical/Efficient] [method/finding] enabling [application]
+```
+
+## Step 5: Evaluate against goal
 
 Read the metric/goal from the research plan:
 
@@ -32,7 +80,7 @@ Read the metric/goal from the research plan:
 - If qualitative goal: are the success criteria met?
 - What's the best result so far across all phases?
 
-## Step 3: Think deeply about next steps
+## Step 6: Think deeply about next steps
 
 Don't just classify — reason step by step:
 
@@ -50,22 +98,25 @@ Don't just classify — reason step by step:
 
 If you run out of ideas, think harder. Re-read the paper draft. The answer is often in the limitations.
 
-## Step 4: Decide
+## Step 7: Decide
 
 Choose ONE of these decisions:
 
 - **done**: Goal achieved, no further improvement expected. Research complete.
-- **add_phases**: Current direction is right, but we need more phases (e.g., "add ensemble phase").
+- **add_phases**: Current direction is right, but we need more phases. Specify exactly what phases to add (e.g., "add ensemble phase", "add error analysis phase", "add missing baseline").
 - **idea_mutation**: Results suggest a fundamentally different approach (e.g., "predict velocity instead of position"). This starts a new iteration.
 - **domain_pivot**: Our domain understanding was wrong or incomplete. Need to research again from scratch.
 
-## Step 5: Write reflection
+## Step 8: Write reflection
 
 Write to research/{iter}/reflect.json with required fields:
 
 - decision: one of done, add_phases, idea_mutation, domain_pivot
 - reason: 2-3 sentences explaining why, citing specific experiment results
 - best_result: best experiment details (phase_id, metric_value, config)
+- diagnosis: root cause analysis for gaps (from Step 2)
+- missing_experiments: list of experiments that should be added (from Step 3)
+- contributions: draft contribution bullets (from Step 4)
 - new_idea: (only if decision is idea_mutation) the new idea
 - carry_over: (only if new iteration) which artifacts to keep
 
