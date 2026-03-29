@@ -17,22 +17,11 @@
       "id": "DOMAIN_RESEARCH",
       "type": "ai_session",
       "prompt": "prompts/domain_research.md",
-      "allowed_tools": [
-        "WebSearch",
-        "WebFetch",
-        "Read",
-        "Write"
-      ],
-      "allowed_write_globs": [
-        "research/{iter}/.domain_research.json"
-      ],
+      "allowed_tools": ["WebSearch", "WebFetch", "Read", "Write"],
+      "allowed_write_globs": ["research/{iter}/.domain_research.json"],
       "completion": {
         "artifact": "research/{iter}/.domain_research.json",
-        "required_fields": [
-          "domain_type",
-          "sota_models",
-          "references"
-        ]
+        "required_fields": ["domain_type", "sota_models", "references"]
       },
       "error": {
         "max_retries": 2,
@@ -44,20 +33,11 @@
       "id": "DATA_DEEP_DIVE",
       "type": "ai_session",
       "prompt": "prompts/data_deep_dive.md",
-      "allowed_tools": [
-        "Read",
-        "Bash",
-        "Write"
-      ],
-      "allowed_write_globs": [
-        "research/{iter}/.data_analysis.json"
-      ],
+      "allowed_tools": ["Read", "Bash", "Write"],
+      "allowed_write_globs": ["research/{iter}/.data_analysis.json"],
       "completion": {
         "artifact": "research/{iter}/.data_analysis.json",
-        "required_fields": [
-          "files",
-          "features"
-        ]
+        "required_fields": ["files", "features"]
       },
       "error": {
         "max_retries": 2,
@@ -69,23 +49,13 @@
       "id": "IDEA_REFINE",
       "type": "ai_session",
       "prompt": "prompts/idea_refine.md",
-      "allowed_tools": [
-        "Read",
-        "Write"
-      ],
+      "allowed_tools": ["Read", "Write"],
       "interactive": true,
       "interactive_fallback": "self_answer",
-      "allowed_write_globs": [
-        "research/{iter}/.idea_refined.json"
-      ],
+      "allowed_write_globs": ["research/{iter}/.idea_refined.json"],
       "completion": {
         "artifact": "research/{iter}/.idea_refined.json",
-        "required_fields": [
-          "goal",
-          "inputs",
-          "outputs",
-          "metric"
-        ]
+        "required_fields": ["goal", "inputs", "outputs", "metric"]
       },
       "next": "PLAN"
     },
@@ -93,25 +63,12 @@
       "id": "PLAN",
       "type": "ai_session",
       "prompt": "prompts/plan.md",
-      "allowed_tools": [
-        "Read",
-        "Write"
-      ],
-      "allowed_write_globs": [
-        "research/{iter}/research_plan.json"
-      ],
-      "context": [
-        "iter",
-        "domain_research",
-        "data_analysis",
-        "idea_refined"
-      ],
+      "allowed_tools": ["Read", "Write"],
+      "allowed_write_globs": ["research/{iter}/research_plan.json"],
+      "context": ["iter", "domain_research", "data_analysis", "idea_refined"],
       "completion": {
         "artifact": "research/{iter}/research_plan.json",
-        "required_fields": [
-          "name",
-          "phases"
-        ]
+        "required_fields": ["name", "phases"]
       },
       "next": "PLAN_REVIEW"
     },
@@ -136,31 +93,17 @@
       },
       "next": {
         "true": "PHASE_CODE",
-        "false": "REFLECT"
+        "false": "PAPER_DRAFT"
       }
     },
     {
       "id": "PHASE_CODE",
       "type": "ai_session",
       "prompt": "prompts/phase_code.md",
-      "allowed_tools": [
-        "Read",
-        "Write",
-        "Edit",
-        "Bash"
-      ],
-      "allowed_write_globs": [
-        "research/{iter}/phases/*",
-        "shared/lib/*"
-      ],
-      "blocked_bash_patterns": [
-        "python research/*/phases/*"
-      ],
-      "context": [
-        "iter",
-        "current_phase",
-        "previous_results_summary"
-      ],
+      "allowed_tools": ["Read", "Write", "Edit", "Bash"],
+      "allowed_write_globs": ["research/{iter}/phases/*", "shared/lib/*"],
+      "blocked_bash_patterns": ["python research/*/phases/*"],
+      "context": ["iter", "current_phase", "previous_results_summary"],
       "completion": {
         "artifact": "research/{iter}/phases/phase_*.py"
       },
@@ -173,9 +116,7 @@
     {
       "id": "PHASE_RUN",
       "type": "process",
-      "blocked_write_globs": [
-        "research/{iter}/phases/*"
-      ],
+      "blocked_write_globs": ["research/{iter}/phases/*"],
       "error": {
         "max_retries": 1,
         "on_exhaust": "ask"
@@ -213,27 +154,31 @@
       }
     },
     {
+      "id": "PAPER_DRAFT",
+      "type": "ai_session",
+      "prompt": "prompts/paper_draft.md",
+      "allowed_tools": ["Read", "Write"],
+      "allowed_write_globs": ["research/{iter}/paper_draft.md"],
+      "context": ["iter", "previous_results_summary"],
+      "completion": {
+        "artifact": "research/{iter}/paper_draft.md"
+      },
+      "error": {
+        "max_retries": 1,
+        "on_exhaust": "skip"
+      },
+      "next": "REFLECT"
+    },
+    {
       "id": "REFLECT",
       "type": "ai_session",
       "prompt": "prompts/reflect.md",
-      "allowed_tools": [
-        "Read",
-        "Write"
-      ],
-      "allowed_write_globs": [
-        "research/{iter}/reflect.json"
-      ],
-      "context": [
-        "iter",
-        "all_results",
-        "iterations_history"
-      ],
+      "allowed_tools": ["Read", "Write"],
+      "allowed_write_globs": ["research/{iter}/reflect.json"],
+      "context": ["iter", "all_results", "iterations_history"],
       "completion": {
         "artifact": "research/{iter}/reflect.json",
-        "required_fields": [
-          "decision",
-          "reason"
-        ]
+        "required_fields": ["decision", "reason"]
       },
       "next": "REFLECT_DONE"
     },

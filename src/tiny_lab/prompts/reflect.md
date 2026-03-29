@@ -8,10 +8,14 @@ Previous results:
 
 ## Your Task
 
-Read ALL results from research/{iter}/results/ and the research plan at research/{iter}/research_plan.json.
-Also read research/.iterations.json if it exists (previous iteration history).
+Read ALL of these:
 
-## Step 1: Analyze results
+- research/{iter}/results/ — all phase results
+- research/{iter}/research_plan.json — the plan
+- research/{iter}/paper_draft.md — the paper draft (if exists). Pay special attention to the **Limitations** and **Future Work** sections — these are the seeds for the next iteration.
+- research/.iterations.json — previous iteration history (if exists)
+
+## Step 1: Analyze results + paper
 
 For each completed phase:
 
@@ -37,7 +41,14 @@ Don't just classify — reason step by step:
 - What did we learn that changes our understanding?
 - Are there near-misses we could combine?
 
-If you run out of ideas, think harder. Re-read the results. Look for patterns you missed.
+**Use the paper draft as a thinking tool:**
+
+- The **Limitations** section identifies known weaknesses — can we address any?
+- The **Future Work** section suggests next directions — pick the most promising
+- The **Discussion** section may reveal gaps between our results and SOTA
+- If idea_mutation: the paper's limitations become the motivation for the new idea
+
+If you run out of ideas, think harder. Re-read the paper draft. The answer is often in the limitations.
 
 ## Step 4: Decide
 
