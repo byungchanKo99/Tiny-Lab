@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tiny-lab"
-version = "6.3.0"
+version = "6.4.0"
 description = "Plan-driven AI research loop"
 readme = "README.md"
 license = "MIT"
