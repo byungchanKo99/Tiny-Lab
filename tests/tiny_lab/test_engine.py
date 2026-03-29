@@ -57,12 +57,35 @@ class TestEngineInit:
 
 class TestCheckpointAutonomous:
     def test_auto_approves_in_autonomous_mode(self, project_dir):
-        save_state(project_dir, LoopState(state="PLAN_REVIEW", current_iteration=1))
+        """Non-mandatory CHECKPOINT auto-approves in autonomous mode."""
+        save_state(project_dir, LoopState(state="CHECKPOINT", current_iteration=1))
         (iter_dir(project_dir, 1)).mkdir(parents=True)
         engine = make_engine(project_dir)
-        spec = engine.workflow.get_state("PLAN_REVIEW")
+        spec = engine.workflow.get_state("CHECKPOINT")
         ls = load_state(project_dir)
 
+        from tiny_lab.handlers.checkpoint import CheckpointHandler
+        handler = CheckpointHandler()
+        result = handler.execute(spec, ls, engine.ctx)
+
+        assert result.transition == "PHASE_SELECT"
+
+    def test_mandatory_checkpoint_waits_for_intervention(self, project_dir):
+        """Mandatory PLAN_REVIEW waits even in autonomous mode."""
+        (iter_dir(project_dir, 1)).mkdir(parents=True)
+        save_state(project_dir, LoopState(state="PLAN_REVIEW", current_iteration=1))
+
+        # Pre-write intervention so it doesn't hang
+        from tiny_lab.paths import intervention_path
+        ipath = intervention_path(project_dir)
+        ipath.parent.mkdir(parents=True, exist_ok=True)
+        ipath.write_text(json.dumps({"action": "approve"}))
+
+        engine = make_engine(project_dir)
+        spec = engine.workflow.get_state("PLAN_REVIEW")
+        assert spec.mandatory is True
+
+        ls = load_state(project_dir)
         from tiny_lab.handlers.checkpoint import CheckpointHandler
         handler = CheckpointHandler()
         result = handler.execute(spec, ls, engine.ctx)

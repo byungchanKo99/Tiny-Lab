@@ -23,6 +23,11 @@ class CheckpointHandler:
         if ipath.exists():
             return _process_intervention(spec, ls, ctx, ipath)
 
+        # Mandatory checkpoint — always wait, regardless of autonomy mode
+        if spec.mandatory:
+            log(f"ENGINE: checkpoint {spec.id} — mandatory, waiting for intervention")
+            return self._wait_for_intervention(spec, ls, ctx, ipath)
+
         # Autonomous → auto-approve
         if ctx.autonomy.mode == "autonomous":
             log(f"ENGINE: checkpoint {spec.id} — autonomous mode, auto-approving")
@@ -40,6 +45,15 @@ class CheckpointHandler:
 
         log("ENGINE: checkpoint timeout, auto-advancing")
         return _advance(spec, "approve", ls, ctx)
+
+    def _wait_for_intervention(
+        self, spec: StateSpec, ls: LoopState, ctx: EngineContext, ipath: "Path",  # type: ignore[name-defined] # noqa: F821
+    ) -> StateResult:
+        """Wait indefinitely for intervention (no timeout auto-approve)."""
+        while True:
+            if ipath.exists():
+                return _process_intervention(spec, ls, ctx, ipath)
+            time.sleep(5)
 
 
 def _process_intervention(

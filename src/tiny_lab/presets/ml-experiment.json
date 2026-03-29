@@ -75,6 +75,7 @@
     {
       "id": "PLAN_REVIEW",
       "type": "checkpoint",
+      "mandatory": true,
       "condition": {
         "source": ".intervention.json",
         "field": "action"

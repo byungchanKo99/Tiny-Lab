@@ -57,6 +57,7 @@ class StateSpec:
     context: list[str] = field(default_factory=list)
     interactive: bool = False
     interactive_fallback: str = "self_answer"  # self_answer | wait | skip
+    mandatory: bool = False  # checkpoint always waits, even in autonomous mode
     completion: CompletionSpec | None = None
     error: ErrorSpec | None = None
     condition: ConditionSpec | None = None
@@ -152,6 +153,7 @@ def _parse_state(raw: dict[str, Any]) -> StateSpec:
         context=raw.get("context", []),
         interactive=raw.get("interactive", False),
         interactive_fallback=raw.get("interactive_fallback", "self_answer"),
+        mandatory=raw.get("mandatory", False),
         completion=_parse_completion(raw.get("completion")),
         error=_parse_error(raw.get("error")),
         condition=_parse_condition(raw.get("condition")),
