@@ -417,7 +417,14 @@ class Engine:
         schema = report_spec.get("schema", {})
         if schema:
             data = json.loads(report_path.read_text())
-            missing = [k for k in schema if k not in data]
+            # Extract expected field names from schema
+            # If schema is JSON Schema format (has "properties"), use property keys
+            # Otherwise treat schema keys as direct field names
+            if "properties" in schema:
+                expected_fields = list(schema.get("required", schema["properties"].keys()))
+            else:
+                expected_fields = list(schema.keys())
+            missing = [k for k in expected_fields if k not in data]
             if missing:
                 raise StateError(f"Report missing fields: {missing}")
 
