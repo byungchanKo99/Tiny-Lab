@@ -532,11 +532,12 @@ class Engine:
             return f"You are in state {spec.id}. Complete the required artifact."
 
         template = prompt_path.read_text()
-        # Safe format — missing keys stay as {key}
-        class SafeDict(dict):
-            def __missing__(self, key: str) -> str:
-                return f"{{{key}}}"
-        return template.format_map(SafeDict(context))
+        # Manual substitution — only replace known context keys
+        # Avoids format_map which breaks on LaTeX {1}, {N}, etc.
+        result = template
+        for key, value in context.items():
+            result = result.replace(f"{{{key}}}", str(value))
+        return result
 
     def _try_fix_json(self, spec: StateSpec, ls: LoopState) -> bool:
         """If artifact exists but is invalid JSON, ask Claude to fix it. Returns True if fixed."""
