@@ -102,9 +102,23 @@ If you run out of ideas, think harder. Re-read the paper draft. The answer is of
 
 Choose ONE of these decisions:
 
-- **done**: Goal achieved, no further improvement expected. Research complete.
+- **done**: ONLY use this if ALL of the following are true:
+
+  1. The original goal is fully achieved (metric target met)
+  2. There are NO promising follow-up directions remaining
+  3. You cannot think of a single experiment that would yield new insight
+     If you have future_iteration_seeds or any "Future Work" ideas, you are NOT done — use idea_mutation instead.
+
 - **add_phases**: Current direction is right, but we need more phases. Specify exactly what phases to add (e.g., "add ensemble phase", "add error analysis phase", "add missing baseline").
-- **idea_mutation**: Results suggest a fundamentally different approach (e.g., "predict velocity instead of position"). This starts a new iteration.
+
+- **idea_mutation**: Results suggest a new research direction. This starts a new iteration. Use this when:
+
+  - You have promising follow-up ideas (future_iteration_seeds)
+  - The paper's Future Work section has actionable items
+  - A different approach could yield better results
+  - Cross-domain evaluation or new data could add value
+    **Prefer this over done.** Research is iterative — if there's a next question worth asking, ask it.
+
 - **domain_pivot**: Our domain understanding was wrong or incomplete. Need to research again from scratch.
 
 ## Step 8: Write reflection
@@ -117,7 +131,10 @@ Write to research/{iter}/reflect.json with required fields:
 - diagnosis: root cause analysis for gaps (from Step 2)
 - missing_experiments: list of experiments that should be added (from Step 3)
 - contributions: draft contribution bullets (from Step 4)
-- new_idea: (only if decision is idea_mutation) the new idea
+- future_iteration_seeds: list of 1-3 promising follow-up research directions, each with a one-line description. ALWAYS include this, even if decision is "done".
+- new_idea: (required if decision is idea_mutation) pick the most promising seed and expand it into a concrete research idea
 - carry_over: (only if new iteration) which artifacts to keep
+
+**Critical**: If future_iteration_seeds is non-empty, your decision should almost certainly be idea_mutation, not done. "I have ideas but I'm stopping" is a contradiction.
 
 Be honest. If the results are mediocre, say so. If the idea needs to change, change it.
