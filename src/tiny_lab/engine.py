@@ -123,10 +123,26 @@ class Engine:
                 self._carry_over(ls.current_iteration, new_iter, result.transition)
                 overrides["current_iteration"] = new_iter
             set_state(self.project_dir, result.transition, **overrides)
-        elif overrides:
-            # No transition, but state_overrides (e.g. PHASE_SELECT setting current_phase_id)
+        else:
+            # Save overrides first (e.g. PHASE_SELECT setting current_phase_id)
+            if overrides:
+                current_ls = load_state(self.project_dir)
+                set_state(self.project_dir, current_ls.state, **overrides)
+            # Then follow spec.next
+            self._follow_next(spec, ls)
+
+    def _follow_next(self, spec: StateSpec, ls: LoopState) -> None:
+        """Evaluate and apply spec.next transition."""
+        if isinstance(spec.next, str):
+            set_state(self.project_dir, spec.next)
+        elif isinstance(spec.next, dict) and spec.condition:
+            from .conditions import resolve_condition
             current_ls = load_state(self.project_dir)
-            set_state(self.project_dir, current_ls.state, **overrides)
+            nxt = resolve_condition(
+                spec.condition, spec.next,
+                self.project_dir, current_ls.current_iteration,
+            )
+            set_state(self.project_dir, nxt)
 
     # ------------------------------------------------------------------
     # Error handling
