@@ -21,6 +21,7 @@ class LoopState:
     current_phase_id: str | None = None  # which research_plan phase is active
     resumable: bool = True
     consecutive_failures: int = 0
+    phase_retries: int = 0  # retries for current phase (resets on phase change)
 
 
 def load_state(project_dir: Path) -> LoopState:
@@ -36,6 +37,7 @@ def load_state(project_dir: Path) -> LoopState:
             current_phase_id=data.get("current_phase_id"),
             resumable=data.get("resumable", True),
             consecutive_failures=data.get("consecutive_failures", 0),
+            phase_retries=data.get("phase_retries", 0),
         )
     except (json.JSONDecodeError, KeyError):
         return LoopState()

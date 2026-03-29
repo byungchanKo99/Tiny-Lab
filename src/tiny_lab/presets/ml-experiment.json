@@ -5,7 +5,7 @@
     "allow_idea_mutation": true,
     "stop_on_target": true,
     "circuit_breaker": {
-      "max_consecutive_failures": 3
+      "max_consecutive_failures": 12
     }
   },
   "intervention": {
@@ -76,7 +76,7 @@
       "id": "PLAN_REVIEW",
       "type": "checkpoint",
       "condition": {
-        "source": "research/.intervention.json",
+        "source": ".intervention.json",
         "field": "action"
       },
       "next": {
@@ -118,8 +118,9 @@
       "type": "process",
       "blocked_write_globs": ["research/{iter}/phases/*"],
       "error": {
-        "max_retries": 1,
-        "on_exhaust": "ask"
+        "max_retries": 10,
+        "retry_to": "PHASE_CODE",
+        "on_exhaust": "skip_phase"
       },
       "next": "PHASE_EVALUATE"
     },
@@ -127,7 +128,7 @@
       "id": "PHASE_EVALUATE",
       "type": "process",
       "error": {
-        "max_retries": 2,
+        "max_retries": 10,
         "retry_to": "PHASE_CODE",
         "on_exhaust": "skip_phase"
       },
@@ -142,7 +143,7 @@
       "id": "CHECKPOINT",
       "type": "checkpoint",
       "condition": {
-        "source": "research/.intervention.json",
+        "source": ".intervention.json",
         "field": "action"
       },
       "next": {
@@ -186,7 +187,7 @@
       "id": "REFLECT_DONE",
       "type": "process",
       "condition": {
-        "source": "research/{iter}/reflect.json",
+        "source": "{iter}/reflect.json",
         "field": "decision"
       },
       "next": {

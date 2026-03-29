@@ -167,6 +167,24 @@ def _cmd_init(project_dir: Path, preset: str) -> None:
         print("research/.gitignore installed")
 
 
+def _load_registry(project_dir: Path) -> "HandlerRegistry":  # type: ignore[name-defined]  # noqa: F821
+    """Load handler registry based on workflow preset."""
+    from .handlers.defaults import base_registry, research_registry
+    from .paths import workflow_path
+    import json
+
+    wf_path = workflow_path(project_dir)
+    if not wf_path.exists():
+        return base_registry()
+
+    data = json.loads(wf_path.read_text())
+    # If any state has phase-related IDs, use research registry
+    state_ids = {s.get("id", "") for s in data.get("states", [])}
+    if state_ids & {"PHASE_SELECT", "PHASE_RUN", "PHASE_EVALUATE", "PHASE_RECORD"}:
+        return research_registry()
+    return base_registry()
+
+
 def _cmd_run(project_dir: Path, idea: str | None) -> None:
     """Start the research loop."""
     from .engine import Engine
@@ -177,12 +195,11 @@ def _cmd_run(project_dir: Path, idea: str | None) -> None:
         sys.exit(1)
 
     if idea:
-        # Store idea for IDEA_REFINE to pick up
         idea_file = project_dir / "research" / ".user_idea.txt"
         idea_file.write_text(idea)
         log(f"User idea: {idea}")
 
-    engine = Engine(project_dir)
+    engine = Engine(project_dir, _load_registry(project_dir))
     engine.run()
 
 
@@ -228,7 +245,7 @@ def _cmd_resume(project_dir: Path, add_phase: str | None, from_phase: str | None
         log(f"Resuming from phase {from_phase}")
 
     from .engine import Engine
-    engine = Engine(project_dir)
+    engine = Engine(project_dir, _load_registry(project_dir))
     engine.run()
 
 
@@ -241,9 +258,8 @@ def _cmd_fork(project_dir: Path, enter: str | None, idea: str | None, source_ite
     source = source_iter or ls.current_iteration
     new_iter = source + 1
 
-    # Create new iteration
     from .engine import Engine
-    engine = Engine(project_dir)
+    engine = Engine(project_dir, _load_registry(project_dir))
     engine._create_iteration(new_iter)
 
     entry_state = enter or "PLAN"
