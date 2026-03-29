@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -93,7 +94,7 @@ def _run_script(phase: dict[str, Any], ls: LoopState, ctx: EngineContext) -> Non
     rdir.mkdir(parents=True, exist_ok=True)
 
     result = subprocess.run(
-        ["python", str(script)],
+        [sys.executable, str(script)],
         capture_output=True,
         text=True,
         cwd=str(ctx.project_dir),
@@ -158,7 +159,7 @@ def _run_optimize(phase: dict[str, Any], ls: LoopState, ctx: EngineContext) -> N
 
     log(f"ENGINE: running optimize phase {phase_id}")
     result = run_optimize(
-        base_command=f"python {scripts[0]}",
+        base_command=f"{sys.executable} {scripts[0]}",
         phase_config=opt_config,
         metric_name=metric_name,
         direction=direction,
