@@ -297,17 +297,59 @@ def _cmd_shape(project_dir: Path, constraints_file: str) -> None:
 
 
 def _cmd_status(project_dir: Path) -> None:
-    """Show current state."""
+    """Show current state — concise one-screen summary."""
+    import json
     from .state import load_state
+    from .paths import (
+        constraints_path, convergence_log_path, iter_dir,
+        plan_path, results_dir, iterations_path,
+    )
 
     ls = load_state(project_dir)
-    print(f"Iteration: {ls.current_iteration}")
-    print(f"State: {ls.state}")
-    if ls.current_phase_id:
-        print(f"Phase: {ls.current_phase_id}")
-    print(f"Resumable: {ls.resumable}")
+
+    # One-line header
+    phase_str = f" → {ls.current_phase_id}" if ls.current_phase_id else ""
+    session_str = f"  session={ls.session_id[:8]}…" if ls.session_id else ""
+    print(f"iter_{ls.current_iteration}  {ls.state}{phase_str}{session_str}")
+
+    # Objective from constraints
+    cpath = constraints_path(project_dir)
+    if cpath.exists():
+        c = json.loads(cpath.read_text())
+        print(f"  objective: {c.get('objective', '?')[:80]}")
+
+    # Phase progress
+    pp = plan_path(project_dir, ls.current_iteration)
+    if pp.exists():
+        plan = json.loads(pp.read_text())
+        phases = plan.get("phases", [])
+        done = sum(1 for p in phases if p.get("status") == "done")
+        total = len(phases)
+        bar = "█" * done + "░" * (total - done)
+        print(f"  phases: [{bar}] {done}/{total}")
+
+    # Results count
+    rdir = results_dir(project_dir, ls.current_iteration)
+    if rdir.exists():
+        n_results = len(list(rdir.glob("*.json")))
+        n_plots = len(list(rdir.glob("*.png")))
+        if n_results or n_plots:
+            print(f"  results: {n_results} json, {n_plots} plots")
+
+    # Errors
     if ls.consecutive_failures > 0:
-        print(f"Consecutive failures: {ls.consecutive_failures}")
+        print(f"  ⚠ failures: {ls.consecutive_failures} consecutive")
+    if ls.phase_retries > 0:
+        print(f"  ⚠ retries: {ls.phase_retries}")
+
+    # Iteration history (compact)
+    ipath = iterations_path(project_dir)
+    if ipath.exists():
+        data = json.loads(ipath.read_text()) or {}
+        iters = data.get("iterations", [])
+        if iters:
+            decisions = " → ".join(f"iter_{i['id']}:{i.get('decision', '?')[:4]}" for i in iters)
+            print(f"  history: {decisions}")
 
 
 def _cmd_stop(project_dir: Path) -> None:
