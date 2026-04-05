@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tiny-lab"
-version = "7.2.0"
+version = "7.2.1"
 description = "Domain-agnostic adaptive loop"
 readme = "README.md"
 license = "MIT"

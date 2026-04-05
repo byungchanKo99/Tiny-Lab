@@ -427,54 +427,142 @@ def _cmd_board(project_dir: Path, iteration: int | None) -> None:
             print(f"  [{status_icon}] {p['id']}: {p.get('name', '')} ({p.get('type', 'script')})")
         print()
 
-    # Results
+    # Plan validation
+    idir = iter_dir(project_dir, target_iter)
+    pv_file = idir / ".plan_validation.json" if idir.exists() else None
+    if pv_file and pv_file.exists():
+        pv = json.loads(pv_file.read_text())
+        verdict = pv.get("verdict", "?")
+        checks = pv.get("checks", {})
+        check_summary = " ".join(
+            f"{'✓' if v in ('pass', 'sufficient', 'complete', 'rigorous', 'clear', 'adequate', 'acceptable') else '✗'}{k[:8]}"
+            for k, v in checks.items()
+        )
+        print(f"Validation: {verdict}  [{check_summary}]")
+        issues = pv.get("issues", [])
+        blockers = [i for i in issues if i.get("severity") == "blocker"]
+        if blockers:
+            for b in blockers:
+                print(f"  ✗ {b.get('criterion', '?')}: {b.get('description', '')[:70]}")
+        print()
+
+    # Results — extract key metrics for comparison table
     rdir = results_dir(project_dir, target_iter)
     if rdir.exists() and list(rdir.glob("*.json")):
-        print("Results:")
+        # Collect metric columns across all results
+        _METRIC_KEYS = [
+            "test_mae_C", "test_mae", "mae", "MAE",
+            "test_rmse_C", "test_rmse", "rmse", "RMSE",
+            "test_accuracy", "accuracy", "cv_accuracy_mean",
+            "better_baseline_mae_C",
+        ]
+        rows: list[tuple[str, dict]] = []
         for f in sorted(rdir.glob("*.json")):
             try:
                 data = json.loads(f.read_text())
-                # Show key metrics, not full dump
-                summary_keys = [k for k in data if k not in ("all_trials",) and not isinstance(data[k], (list, dict)) or k == "best_params"]
-                parts = []
-                for k in summary_keys:
-                    v = data[k]
-                    if isinstance(v, float):
-                        parts.append(f"{k}={v:.4f}")
-                    elif isinstance(v, dict):
-                        inner = ", ".join(f"{ik}={iv}" for ik, iv in list(v.items())[:3])
-                        parts.append(f"{k}=({inner})")
-                    else:
-                        parts.append(f"{k}={v}")
-                print(f"  {f.stem}: {', '.join(parts)}")
+                if not isinstance(data, dict):
+                    continue
+                model = data.get("model_id", data.get("model", f.stem))
+                metrics = {}
+                for k in _METRIC_KEYS:
+                    if k in data and isinstance(data[k], (int, float)):
+                        metrics[k] = data[k]
+                # Also grab status and beats flags
+                for k in ("beats_naive", "beats_ma", "target_achieved", "status"):
+                    if k in data:
+                        metrics[k] = data[k]
+                if metrics:
+                    rows.append((str(model), metrics))
             except Exception:
-                print(f"  {f.stem}: (parse error)")
-        print()
+                pass
+
+        if rows:
+            # Find common metric columns
+            all_keys = []
+            for _, m in rows:
+                for k in m:
+                    if k not in all_keys and isinstance(m[k], (int, float)):
+                        all_keys.append(k)
+
+            print("Results:")
+            # Header
+            header = f"  {'Model':<25s}"
+            for k in all_keys[:4]:  # max 4 metric columns
+                header += f" {k:>12s}"
+            print(header)
+            print(f"  {'─'*25}" + "─" * (13 * min(len(all_keys), 4)))
+
+            for model, metrics in rows:
+                row = f"  {model:<25s}"
+                for k in all_keys[:4]:
+                    v = metrics.get(k)
+                    if isinstance(v, float):
+                        row += f" {v:>12.4f}"
+                    elif v is not None:
+                        row += f" {str(v):>12s}"
+                    else:
+                        row += f" {'—':>12s}"
+                # Append flags
+                flags = []
+                if metrics.get("beats_naive"):
+                    flags.append("✓naive")
+                if metrics.get("beats_ma"):
+                    flags.append("✓ma")
+                if metrics.get("target_achieved"):
+                    flags.append("✓goal")
+                if flags:
+                    row += f"  [{', '.join(flags)}]"
+                print(row)
+            print()
+        else:
+            # Fallback: show raw
+            print("Results:")
+            for f in sorted(rdir.glob("*.json")):
+                try:
+                    data = json.loads(f.read_text())
+                    parts = []
+                    for k, v in data.items():
+                        if isinstance(v, float):
+                            parts.append(f"{k}={v:.4f}")
+                        elif not isinstance(v, (list, dict)):
+                            parts.append(f"{k}={v}")
+                    print(f"  {f.stem}: {', '.join(parts[:6])}")
+                except Exception:
+                    print(f"  {f.stem}: (parse error)")
+            print()
 
     # Understanding artifacts
-    idir = iter_dir(project_dir, target_iter)
     artifacts = [".domain_research.json", ".data_analysis.json", ".idea_refined.json"]
-    present = [a for a in artifacts if (idir / a).exists()]
+    present = [a for a in artifacts if idir.exists() and (idir / a).exists()]
     if present:
         print(f"Understanding: {', '.join(a.replace('.json', '').lstrip('.') for a in present)}")
 
     # Reflect
     reflect_file = idir / "reflect.json" if idir.exists() else None
     if reflect_file and reflect_file.exists():
-        import json
         reflect = json.loads(reflect_file.read_text())
         print(f"Reflect: {reflect.get('decision', '?')} — {reflect.get('reason', '')[:100]}")
 
     # Iterations history
     ipath = iterations_path(project_dir)
     if ipath.exists():
-        import json
         data = json.loads(ipath.read_text()) or {}
         iters = data.get("iterations", [])
         if iters:
             print(f"\nIteration History:")
             for it in iters:
                 print(f"  iter_{it['id']}: {it.get('decision', '?')} — {it.get('reason', '')[:80]}")
+
+    # Final paper & evaluation
+    final_paper = project_dir / "research" / "final_paper.md"
+    eval_file = project_dir / "research" / "evaluation.json"
+    if final_paper.exists():
+        print(f"\nFinal Paper: {final_paper} ({final_paper.stat().st_size:,} bytes)")
+    if eval_file.exists():
+        ev = json.loads(eval_file.read_text())
+        scores = ev.get("scores", {})
+        score_str = " | ".join(f"{k[:8]}={v}" for k, v in scores.items())
+        print(f"Review: {ev.get('verdict', '?')} (total={ev.get('total', '?')}) [{score_str}]")
 
     # Recent events
     evts = load_events(project_dir, last_n=5)
