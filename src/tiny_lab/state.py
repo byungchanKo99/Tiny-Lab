@@ -22,7 +22,7 @@ class LoopState:
     resumable: bool = True
     consecutive_failures: int = 0
     phase_retries: int = 0  # retries for current phase (resets on phase change)
-    session_id: str | None = None  # Claude session ID for resume within same phase
+    session_id: str | None = None  # Claude session ID — persists across states within iteration
 
 
 def load_state(project_dir: Path) -> LoopState:

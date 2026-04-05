@@ -1,12 +1,17 @@
 {
   "autonomy": {
     "mode": "autonomous",
-    "max_iterations": 5,
+    "max_iterations": 50,
     "allow_idea_mutation": true,
     "stop_on_target": true,
     "circuit_breaker": {
       "max_consecutive_failures": 12
     }
+  },
+  "exploration": {
+    "convergence_window": 3,
+    "similarity_threshold": 0.7,
+    "force_explore_after": 5
   },
   "intervention": {
     "checkpoint": "between_phases",
@@ -14,11 +19,35 @@
   },
   "states": [
     {
+      "id": "SHAPE_FULL",
+      "type": "ai_session",
+      "prompt": "prompts/_shared/shape_full.md",
+      "allowed_tools": ["Read", "Write", "WebSearch", "WebFetch"],
+      "interactive": true,
+      "interactive_fallback": "interactive",
+      "allowed_write_globs": [
+        "research/.shaped_input.json",
+        "research/constraints.json"
+      ],
+      "completion": {
+        "artifact": "research/constraints.json",
+        "required_fields": ["objective", "goal", "invariants"]
+      },
+      "error": {
+        "max_retries": 5,
+        "on_exhaust": "stop"
+      },
+      "next": "DOMAIN_RESEARCH"
+    },
+    {
       "id": "DOMAIN_RESEARCH",
       "type": "ai_session",
       "prompt": "prompts/domain_research.md",
       "allowed_tools": ["WebSearch", "WebFetch", "Read", "Write"],
-      "allowed_write_globs": ["research/{iter}/.domain_research.json"],
+      "allowed_write_globs": [
+        "research/{iter}/.domain_research.json",
+        "shared/knowledge/*"
+      ],
       "completion": {
         "artifact": "research/{iter}/.domain_research.json",
         "required_fields": ["domain_type", "sota_models", "references"]
@@ -78,20 +107,29 @@
         "max_retries": 10,
         "on_exhaust": "stop"
       },
-      "next": "PLAN_REVIEW"
+      "next": "VALIDATE_PLAN"
     },
     {
-      "id": "PLAN_REVIEW",
-      "type": "checkpoint",
-      "mandatory": true,
+      "id": "VALIDATE_PLAN",
+      "type": "ai_session",
+      "prompt": "prompts/validate_plan.md",
+      "allowed_tools": ["Read", "Write"],
+      "allowed_write_globs": ["research/{iter}/.plan_validation.json"],
+      "completion": {
+        "artifact": "research/{iter}/.plan_validation.json",
+        "required_fields": ["verdict", "checks"]
+      },
+      "error": {
+        "max_retries": 3,
+        "on_exhaust": "stop"
+      },
       "condition": {
-        "source": ".intervention.json",
-        "field": "action"
+        "source": "{iter}/.plan_validation.json",
+        "field": "verdict"
       },
       "next": {
-        "approve": "PHASE_SELECT",
-        "modify_plan": "PLAN",
-        "stop": "DONE"
+        "APPROVE": "PHASE_SELECT",
+        "REJECT": "PLAN"
       }
     },
     {
@@ -184,26 +222,100 @@
       "type": "ai_session",
       "prompt": "prompts/reflect.md",
       "allowed_tools": ["Read", "Write"],
-      "allowed_write_globs": ["research/{iter}/reflect.json"],
+      "allowed_write_globs": [
+        "research/{iter}/reflect.json",
+        "research/convergence_log.json"
+      ],
       "context": ["iter", "all_results", "iterations_history"],
       "completion": {
         "artifact": "research/{iter}/reflect.json",
         "required_fields": ["decision", "reason"]
       },
-      "next": "REFLECT_DONE"
+      "next": "SHAPE_SEED"
     },
     {
-      "id": "REFLECT_DONE",
+      "id": "SHAPE_SEED",
+      "type": "process",
+      "condition": {
+        "check": "is_converging"
+      },
+      "next": {
+        "true": "EXPLORE",
+        "false": "ROUTE"
+      }
+    },
+    {
+      "id": "EXPLORE",
+      "type": "ai_session",
+      "prompt": "prompts/_shared/explore.md",
+      "allowed_tools": ["Read", "Write"],
+      "allowed_write_globs": ["research/{iter}/.explore_seed.json"],
+      "completion": {
+        "artifact": "research/{iter}/.explore_seed.json",
+        "required_fields": ["new_seed", "rationale"]
+      },
+      "error": {
+        "max_retries": 3,
+        "on_exhaust": "skip"
+      },
+      "next": "DOMAIN_RESEARCH"
+    },
+    {
+      "id": "ROUTE",
       "type": "process",
       "condition": {
         "source": "{iter}/reflect.json",
         "field": "decision"
       },
       "next": {
-        "done": "DONE",
+        "done": "STORY_TELL",
         "add_phases": "PLAN",
         "idea_mutation": "IDEA_REFINE",
         "domain_pivot": "DOMAIN_RESEARCH"
+      }
+    },
+    {
+      "id": "STORY_TELL",
+      "type": "ai_session",
+      "prompt": "prompts/story_tell.md",
+      "allowed_tools": ["Read", "Write"],
+      "allowed_write_globs": ["research/final_paper.md"],
+      "completion": {
+        "artifact": "research/final_paper.md"
+      },
+      "error": {
+        "max_retries": 5,
+        "on_exhaust": "stop"
+      },
+      "next": "REVIEW"
+    },
+    {
+      "id": "REVIEW",
+      "type": "ai_session",
+      "prompt": "prompts/professor.md",
+      "allowed_tools": ["Read", "Write"],
+      "allowed_write_globs": ["research/evaluation.json"],
+      "completion": {
+        "artifact": "research/evaluation.json",
+        "required_fields": ["verdict", "scores"]
+      },
+      "error": {
+        "max_retries": 3,
+        "on_exhaust": "stop"
+      },
+      "next": "REVIEW_DONE"
+    },
+    {
+      "id": "REVIEW_DONE",
+      "type": "process",
+      "condition": {
+        "source": "evaluation.json",
+        "field": "verdict"
+      },
+      "next": {
+        "ACCEPT": "DONE",
+        "REVISE": "IDEA_REFINE",
+        "REJECT": "SHAPE_FULL"
       }
     }
   ]

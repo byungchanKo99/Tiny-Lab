@@ -1,4 +1,4 @@
-"""Centralized path definitions for tiny-lab v5."""
+"""Centralized path definitions for tiny-lab."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,6 +10,18 @@ def research_dir(project_dir: Path) -> Path:
 
 def shared_dir(project_dir: Path) -> Path:
     return project_dir / "shared"
+
+
+def knowledge_dir(project_dir: Path) -> Path:
+    return shared_dir(project_dir) / "knowledge"
+
+
+def constraints_path(project_dir: Path) -> Path:
+    return research_dir(project_dir) / "constraints.json"
+
+
+def convergence_log_path(project_dir: Path) -> Path:
+    return research_dir(project_dir) / "convergence_log.json"
 
 
 def workflow_path(project_dir: Path) -> Path:

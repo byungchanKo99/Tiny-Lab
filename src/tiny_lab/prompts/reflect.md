@@ -137,4 +137,22 @@ Write to research/{iter}/reflect.json with required fields:
 
 **Critical**: If future_iteration_seeds is non-empty, your decision should almost certainly be idea_mutation, not done. "I have ideas but I'm stopping" is a contradiction.
 
+## Step 9: Update convergence log
+
+Read research/convergence_log.json (create if it doesn't exist).
+Append an entry for this iteration:
+
+```json
+{
+  "iteration": {iteration},
+  "seed_summary": "one-line summary of this iteration's core approach",
+  "seed_keywords": ["3-5 keywords describing the method/approach"],
+  "outcome_summary": "one-line summary of the key result",
+  "approach_category": "broad category label (e.g., 'rnn_sequence_model', 'tree_ensemble', 'statistical_baseline')"
+}
+```
+
+Write the updated convergence_log.json to research/convergence_log.json.
+This log is used by the engine to detect convergence and trigger exploration of new directions.
+
 Be honest. If the results are mediocre, say so. If the idea needs to change, change it.

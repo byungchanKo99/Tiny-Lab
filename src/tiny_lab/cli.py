@@ -1,4 +1,4 @@
-"""tiny-lab v5 CLI — plan-driven phase executor."""
+"""tiny-lab v7 CLI — domain-agnostic adaptive loop."""
 from __future__ import annotations
 
 import argparse
@@ -12,17 +12,17 @@ from .logging import log
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="tiny-lab",
-        description="Plan-driven AI research loop",
+        description="Domain-agnostic adaptive loop",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Quick start:
   tiny-lab init                 Set up project (creates research/, prompts/, hooks)
   echo "my idea" > research/.user_idea.txt
-  tiny-lab run                  Start the loop (stops at PLAN_REVIEW for approval)
-  tiny-lab intervene approve    Approve plan, start execution
+  tiny-lab run                  Start the loop (full auto by default)
+  tiny-lab run --max-iter 10    Override max iterations
   tiny-lab board                View results
 
-Workflow: Understand → Plan → PLAN_REVIEW (stop) → Execute → Reflect → Iterate
+Workflow: Shape → Gather → [Execute → Reflect → Diversify]↺ → Synthesize → Evaluate
 """,
     )
     sub = parser.add_subparsers(dest="command")
@@ -37,8 +37,13 @@ Workflow: Understand → Plan → PLAN_REVIEW (stop) → Execute → Reflect →
 
     # run
     run_p = sub.add_parser("run", help="Start the research loop",
-                           description="Run the loop from current state. Stops at PLAN_REVIEW for approval.")
+                           description="Run the full auto loop. Iterates until goal achieved or max iterations.")
     run_p.add_argument("idea", nargs="?", help="Research idea (also saved to research/.user_idea.txt)")
+    run_p.add_argument("--max-iter", type=int, default=None,
+                       help="Override max iterations (default: from preset)")
+    run_p.add_argument("--model", default="sonnet",
+                       choices=["sonnet", "haiku", "opus"],
+                       help="Claude model (default: sonnet)")
 
     # status
     sub.add_parser("status", help="Show current state, iteration, phase")
@@ -58,6 +63,11 @@ Workflow: Understand → Plan → PLAN_REVIEW (stop) → Execute → Reflect →
     fork_p.add_argument("--enter", help="State to enter (e.g., PLAN, IDEA_REFINE)")
     fork_p.add_argument("--idea", help="New idea for the fork")
     fork_p.add_argument("source_iter", nargs="?", type=int, help="Source iteration to fork from")
+
+    # shape — write constraints.json directly (skip SHAPE_FULL state)
+    shape_p = sub.add_parser("shape", help="Write constraints.json directly (skip interactive SHAPE_FULL)",
+                             description="Create constraints.json from a JSON string or file, then set state to DOMAIN_RESEARCH.")
+    shape_p.add_argument("constraints_file", help="Path to constraints JSON file, or '-' for stdin")
 
     # board
     board_p = sub.add_parser("board", help="Results dashboard with metrics")
@@ -83,7 +93,7 @@ Actions:
     if args.command == "init":
         _cmd_init(project_dir, args.preset)
     elif args.command == "run":
-        _cmd_run(project_dir, args.idea)
+        _cmd_run(project_dir, args.idea, args.max_iter, args.model)
     elif args.command == "status":
         _cmd_status(project_dir)
     elif args.command == "stop":
@@ -92,6 +102,8 @@ Actions:
         _cmd_resume(project_dir, args.add_phase, args.from_phase)
     elif args.command == "fork":
         _cmd_fork(project_dir, args.enter, args.idea, args.source_iter)
+    elif args.command == "shape":
+        _cmd_shape(project_dir, args.constraints_file)
     elif args.command == "board":
         _cmd_board(project_dir, args.iter)
     elif args.command == "intervene":
@@ -116,21 +128,19 @@ def _register_hooks(project_dir: Path) -> None:
 
     # PreToolUse: state-gate blocks disallowed operations
     pre = hooks.setdefault("PreToolUse", [])
-    gate_entry = {
-        "matcher": "Write|Edit|Bash",
-        "command": ".claude/hooks/state-gate.sh",
-    }
-    if not any(e.get("command") == gate_entry["command"] for e in pre):
-        pre.append(gate_entry)
+    gate_cmd = "python3 .claude/hooks/state_gate.py"
+    # Remove old sh hook if present
+    pre[:] = [e for e in pre if e.get("command") != ".claude/hooks/state-gate.sh"]
+    if not any(e.get("command") == gate_cmd for e in pre):
+        pre.append({"matcher": "Write|Edit|Bash", "command": gate_cmd})
 
     # PostToolUse: state-advance detects artifacts and transitions
     post = hooks.setdefault("PostToolUse", [])
-    advance_entry = {
-        "matcher": "Write|Edit",
-        "command": ".claude/hooks/state-advance.sh",
-    }
-    if not any(e.get("command") == advance_entry["command"] for e in post):
-        post.append(advance_entry)
+    advance_cmd = "python3 .claude/hooks/state_advance.py"
+    # Remove old sh hook if present
+    post[:] = [e for e in post if e.get("command") != ".claude/hooks/state-advance.sh"]
+    if not any(e.get("command") == advance_cmd for e in post):
+        post.append({"matcher": "Write|Edit", "command": advance_cmd})
 
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings_path.write_text(json.dumps(settings, indent=2) + "\n")
@@ -158,7 +168,7 @@ def _cmd_init(project_dir: Path, preset: str) -> None:
     hooks_src = Path(__file__).parent / "hooks"
     hooks_dst = project_dir / ".claude" / "hooks"
     hooks_dst.mkdir(parents=True, exist_ok=True)
-    for hook in hooks_src.glob("*.sh"):
+    for hook in hooks_src.glob("*.py"):
         dst = hooks_dst / hook.name
         shutil.copy2(hook, dst)
         dst.chmod(0o755)
@@ -216,7 +226,12 @@ def _load_registry(project_dir: Path) -> "HandlerRegistry":  # type: ignore[name
     return base_registry()
 
 
-def _cmd_run(project_dir: Path, idea: str | None) -> None:
+def _cmd_run(
+    project_dir: Path,
+    idea: str | None,
+    max_iter: int | None = None,
+    model: str = "sonnet",
+) -> None:
     """Start the research loop."""
     from .engine import Engine
     from .paths import workflow_path
@@ -230,8 +245,55 @@ def _cmd_run(project_dir: Path, idea: str | None) -> None:
         idea_file.write_text(idea)
         log(f"User idea: {idea}")
 
-    engine = Engine(project_dir, _load_registry(project_dir))
+    engine = Engine(project_dir, _load_registry(project_dir), model=model)
+
+    if max_iter is not None:
+        engine.workflow.autonomy.max_iterations = max_iter
+        log(f"Max iterations overridden: {max_iter}")
+
+    log(f"Model: {model}")
     engine.run()
+
+
+def _cmd_shape(project_dir: Path, constraints_file: str) -> None:
+    """Write constraints.json and advance past SHAPE_FULL."""
+    import json
+    from .paths import research_dir, constraints_path, iter_dir
+    from .state import load_state, set_state
+
+    rd = research_dir(project_dir)
+    rd.mkdir(parents=True, exist_ok=True)
+
+    # Read constraints from file or stdin
+    if constraints_file == "-":
+        data = json.loads(sys.stdin.read())
+    else:
+        data = json.loads(Path(constraints_file).read_text())
+
+    # Validate required fields
+    for field in ("objective", "goal", "invariants"):
+        if field not in data:
+            print(f"Error: constraints must have '{field}' field")
+            sys.exit(1)
+
+    # Write constraints.json
+    cpath = constraints_path(project_dir)
+    cpath.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    print(f"Constraints written: {cpath}")
+
+    # Ensure iter_1 exists
+    idir = iter_dir(project_dir, 1)
+    idir.mkdir(parents=True, exist_ok=True)
+    (idir / "phases").mkdir(exist_ok=True)
+    (idir / "results").mkdir(exist_ok=True)
+
+    # Set state past SHAPE_FULL
+    ls = load_state(project_dir)
+    if ls.state in ("INIT", "SHAPE_FULL"):
+        set_state(project_dir, "DOMAIN_RESEARCH", current_iteration=1)
+        print("State: → DOMAIN_RESEARCH (skipped SHAPE_FULL)")
+    else:
+        print(f"State unchanged: {ls.state} (not in INIT/SHAPE_FULL)")
 
 
 def _cmd_status(project_dir: Path) -> None:
@@ -316,11 +378,37 @@ def _cmd_board(project_dir: Path, iteration: int | None) -> None:
     ls = load_state(project_dir)
     target_iter = iteration or ls.current_iteration
 
+    from .paths import constraints_path, convergence_log_path
+
     # Header
-    print(f"tiny-lab v5 — Iteration {target_iter}")
+    print(f"tiny-lab v7 — Iteration {target_iter}")
     print(f"State: {ls.state}")
     if ls.current_phase_id:
         print(f"Current phase: {ls.current_phase_id}")
+    if ls.session_id:
+        print(f"Session: {ls.session_id[:8]}…")
+
+    # Constraints
+    cpath = constraints_path(project_dir)
+    if cpath.exists():
+        import json as _json
+        c = _json.loads(cpath.read_text())
+        print(f"\nObjective: {c.get('objective', '?')}")
+        goal = c.get("goal", {})
+        if goal.get("success_criteria"):
+            print(f"Goal: {goal['success_criteria']}")
+
+    # Convergence
+    clpath = convergence_log_path(project_dir)
+    if clpath.exists():
+        import json as _json
+        cl = _json.loads(clpath.read_text())
+        entries = cl.get("log", cl.get("entries", []))
+        if entries:
+            print(f"\nConvergence ({len(entries)} entries):")
+            for e in entries:
+                print(f"  iter_{e.get('iteration', '?')}: {e.get('seed_summary', '')[:60]} [{e.get('approach_category', '')}]")
+
     print()
 
     # Plan summary

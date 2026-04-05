@@ -45,4 +45,13 @@ Write your findings to research/{iter}/.domain_research.json with these required
 - known_pitfalls: things that commonly go wrong
 - references: list of papers/URLs with author, year, key findings
 
+## Step 4: Save to shared knowledge
+
+Also save a copy of your findings to shared/knowledge/ so it persists across iterations:
+
+- Write shared/knowledge/domain\_{domain_type}.json with the same content as the domain research
+- If shared/knowledge/ already has domain research from a previous iteration, READ it first and MERGE new findings (don't overwrite — accumulate)
+
+This prevents repeating the same literature search in future iterations.
+
 Be thorough. The quality of the entire research depends on this step.

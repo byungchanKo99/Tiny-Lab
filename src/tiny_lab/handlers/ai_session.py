@@ -10,7 +10,7 @@ from typing import Any
 
 from ..errors import StateError
 from ..logging import log
-from ..paths import results_dir, iter_dir
+from ..paths import results_dir, iter_dir, knowledge_dir, constraints_path
 from ..plan import load_plan
 from ..state import LoopState, load_state, save_state, set_state
 from ..workflow import StateSpec
@@ -24,11 +24,17 @@ class AiSessionHandler:
         context = _build_context(spec, ls, ctx)
         prompt = _render_prompt(spec, context, ctx)
 
-        cmd = ["claude", "-p", prompt, "--output-format", "json", "--model", "sonnet"]
+        return self._run_noninteractive(spec, ls, ctx, prompt)
+
+    def _run_noninteractive(
+        self, spec: StateSpec, ls: LoopState, ctx: EngineContext, prompt: str,
+    ) -> StateResult:
+        """Run Claude in pipe mode (-p) — no user interaction."""
+        cmd = ["claude", "-p", prompt, "--output-format", "json", "--model", ctx.model]
         if spec.allowed_tools:
             cmd.extend(["--allowedTools", ",".join(spec.allowed_tools)])
 
-        # Session resume: reuse session within same phase retries
+        # Session resume: reuse within iteration
         if ls.session_id:
             cmd.extend(["--resume", ls.session_id])
             log(f"ENGINE: resuming session {ls.session_id[:8]}…")
@@ -89,6 +95,114 @@ class AiSessionHandler:
             + (f" ({problem})" if problem else "")
         )
 
+    def _run_interactive(
+        self, spec: StateSpec, ls: LoopState, ctx: EngineContext, prompt: str,
+    ) -> StateResult:
+        """Run Claude with user-in-the-loop via repeated -p calls.
+
+        1. Send initial prompt via -p → Claude asks questions
+        2. Show Claude's response to user, get user's answer
+        3. Send user's answer via -p --resume → Claude continues
+        4. Repeat until artifact is produced (auto-detected)
+
+        No /exit needed — engine detects artifact and moves on.
+        """
+        max_rounds = 5  # max user interaction rounds
+
+        # Ensure session exists
+        if not ls.session_id:
+            session_id = str(uuid.uuid4())
+            ls.session_id = session_id
+            save_state(ctx.project_dir, ls)
+            log(f"ENGINE: interactive new session {session_id[:8]}…")
+
+        # Round 0: send initial prompt
+        current_prompt = prompt
+        for round_n in range(max_rounds + 1):
+            cmd = [
+                "claude", "-p", current_prompt, "--output-format", "json",
+                "--model", ctx.model,
+            ]
+            if spec.allowed_tools:
+                cmd.extend(["--allowedTools", ",".join(spec.allowed_tools)])
+
+            if round_n == 0 and not ls.phase_retries:
+                cmd.extend(["--session-id", ls.session_id])
+            else:
+                cmd.extend(["--resume", ls.session_id])
+
+            log(f"ENGINE: interactive round {round_n} for {spec.id}")
+            result = subprocess.run(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                cwd=str(ctx.project_dir),
+                timeout=300,
+            )
+
+            _update_session_id(result.stdout, ctx)
+
+            # Check if artifact was created
+            new_ls = load_state(ctx.project_dir)
+            if new_ls.state != ls.state:
+                return StateResult()  # hook advanced
+            problem = _try_advance(spec, ls, ctx)
+            new_ls = load_state(ctx.project_dir)
+            if new_ls.state != ls.state:
+                return StateResult()  # artifact found
+
+            # Extract Claude's text response for user
+            claude_text = _extract_text(result.stdout)
+            if not claude_text:
+                claude_text = "(Claude produced no visible output this round)"
+
+            # Show Claude's response and ask user
+            print(f"\n{'─'*60}")
+            print(f"  [{spec.id}] Claude asks:")
+            print(f"{'─'*60}")
+            print(claude_text)
+            print(f"{'─'*60}")
+
+            if round_n >= max_rounds:
+                log(f"ENGINE: max interaction rounds reached, proceeding with defaults")
+                current_prompt = (
+                    "The user did not respond further. "
+                    "Use your best judgment based on domain research to fill in remaining gaps. "
+                    "Write the constraints.json and .shaped_input.json files now."
+                )
+                continue
+
+            try:
+                user_input = input("  Your answer (empty = let Claude decide): ").strip()
+            except (EOFError, KeyboardInterrupt):
+                user_input = ""
+
+            if not user_input:
+                current_prompt = (
+                    "The user accepted your suggestions. "
+                    "Proceed with your proposed defaults and write the output files now."
+                )
+            else:
+                current_prompt = f"User's answer: {user_input}"
+
+        # Final attempt — should not reach here normally
+        raise StateError(
+            f"Interactive session for {spec.id} did not produce artifact after {max_rounds} rounds"
+        )
+
+
+def _extract_text(stdout: str) -> str:
+    """Extract readable text from Claude's JSON output."""
+    if not stdout:
+        return ""
+    try:
+        data = json.loads(stdout)
+        # Claude --output-format json returns {"result": "text", ...}
+        return data.get("result", "")
+    except json.JSONDecodeError:
+        return stdout.strip()
+
 
 # ---------------------------------------------------------------------------
 # Context building
@@ -101,6 +215,7 @@ def _build_context(spec: StateSpec, ls: LoopState, ctx: EngineContext) -> dict[s
         "iter": f"iter_{ls.current_iteration}",
         "iteration": ls.current_iteration,
         "project_dir": str(ctx.project_dir),
+        "knowledge_dir": str(knowledge_dir(ctx.project_dir)),
     }
 
     # Phase info
@@ -179,15 +294,46 @@ def _render_prompt(spec: StateSpec, context: dict[str, Any], ctx: EngineContext)
 
     prompt_path = ctx.project_dir / spec.prompt
     if not prompt_path.exists():
+        # Try _shared/ prompts directory
         prompt_path = Path(__file__).parent.parent / spec.prompt
     if not prompt_path.exists():
         return f"You are in state {spec.id}. Complete the required artifact."
 
     template = prompt_path.read_text()
+
+    # Inject constraints preamble if constraints.json exists
+    constraints_preamble = _load_constraints_preamble(ctx.project_dir)
+    if constraints_preamble:
+        template = constraints_preamble + "\n\n" + template
+
     result = template
     for key, value in context.items():
         result = result.replace(f"{{{key}}}", str(value))
     return result
+
+
+def _load_constraints_preamble(project_dir: Path) -> str:
+    """Load constraints.json and format as a prompt preamble."""
+    cpath = constraints_path(project_dir)
+    if not cpath.exists():
+        return ""
+    try:
+        data = json.loads(cpath.read_text())
+    except (json.JSONDecodeError, OSError):
+        return ""
+
+    parts = ["## Constraints (MUST NOT VIOLATE)", ""]
+    if data.get("objective"):
+        parts.append(f"Objective: {data['objective']}")
+    goal = data.get("goal", {})
+    if goal.get("success_criteria"):
+        parts.append(f"Goal: {goal['success_criteria']}")
+    for inv in data.get("invariants", []):
+        parts.append(f"- Invariant: {inv}")
+    for fb in data.get("exploration_bounds", {}).get("forbidden", []):
+        parts.append(f"- Forbidden: {fb}")
+
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -230,9 +376,18 @@ def _try_advance(spec: StateSpec, ls: LoopState, ctx: EngineContext) -> str | No
         try:
             data = json.loads(Path(matches[0]).read_text())
         except json.JSONDecodeError:
+            # Advance even with bad JSON — engine will retry if needed
             if isinstance(spec.next, str):
                 set_state(ctx.project_dir, spec.next)
                 log(f"ENGINE: advanced {ls.state} → {spec.next} (with JSON warning)")
+            elif isinstance(spec.next, dict) and spec.condition:
+                try:
+                    from ..conditions import resolve_condition
+                    nxt = resolve_condition(spec.condition, spec.next, ctx.project_dir, ls.current_iteration)
+                    set_state(ctx.project_dir, nxt)
+                    log(f"ENGINE: advanced {ls.state} → {nxt} (conditional, JSON warning)")
+                except Exception:
+                    pass
             return None
         if not isinstance(data, dict):
             return f"artifact is not a JSON object (got {type(data).__name__})"
@@ -244,6 +399,12 @@ def _try_advance(spec: StateSpec, ls: LoopState, ctx: EngineContext) -> str | No
     if isinstance(spec.next, str):
         set_state(ctx.project_dir, spec.next)
         log(f"ENGINE: advanced {ls.state} → {spec.next}")
+    elif isinstance(spec.next, dict) and spec.condition:
+        # Conditional transition: resolve condition from artifact
+        from ..conditions import resolve_condition
+        nxt = resolve_condition(spec.condition, spec.next, ctx.project_dir, ls.current_iteration)
+        set_state(ctx.project_dir, nxt)
+        log(f"ENGINE: advanced {ls.state} → {nxt} (conditional)")
     return None
 
 
@@ -268,7 +429,7 @@ def _try_fix_artifact(spec: StateSpec, ls: LoopState, ctx: EngineContext, proble
     )
     log(f"ENGINE: asking Claude to fix artifact: {problem}")
 
-    cmd = ["claude", "-p", fix_prompt, "--allowedTools", "Read,Write,Edit", "--model", "sonnet"]
+    cmd = ["claude", "-p", fix_prompt, "--allowedTools", "Read,Write,Edit", "--model", ctx.model]
     if ls.session_id:
         cmd.extend(["--resume", ls.session_id])
     subprocess.run(
@@ -315,7 +476,7 @@ def _try_fix_json(spec: StateSpec, ls: LoopState, ctx: EngineContext) -> bool:
             f"Do NOT change the content — only fix the syntax."
         )
         subprocess.run(
-            ["claude", "-p", fix_prompt, "--allowedTools", "Read,Write,Edit", "--model", "sonnet"],
+            ["claude", "-p", fix_prompt, "--allowedTools", "Read,Write,Edit", "--model", ctx.model],
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,

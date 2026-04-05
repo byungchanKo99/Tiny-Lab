@@ -220,10 +220,7 @@ def validate_workflow(wf: Workflow) -> None:
         if state.type not in ("ai_session", "process", "checkpoint"):
             errors.append(f"State {state.id}: invalid type '{state.type}'")
 
-        # ai_session must have single next (str)
-        if state.type == "ai_session" and isinstance(state.next, dict):
-            errors.append(f"State {state.id}: ai_session must have single 'next' (str), not dict")
-
+        # ai_session with dict next must have condition (for conditional routing)
         # process/checkpoint with dict next must have condition
         if isinstance(state.next, dict) and state.condition is None:
             errors.append(f"State {state.id}: dict 'next' requires 'condition'")

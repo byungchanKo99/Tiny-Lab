@@ -11,6 +11,7 @@ from typing import Any
 import json
 
 from .errors import StateError
+from .paths import convergence_log_path
 from .workflow import ConditionSpec
 
 
@@ -56,6 +57,7 @@ def _run_builtin_check(check_name: str, project_dir: Path, iteration: int) -> bo
     """Run a built-in check function."""
     checks = {
         "has_pending_phases": _check_has_pending_phases,
+        "is_converging": _check_is_converging,
     }
     fn = checks.get(check_name)
     if fn is None:
@@ -71,3 +73,60 @@ def _check_has_pending_phases(project_dir: Path, iteration: int) -> bool:
         return len(pending_phases(plan)) > 0
     except Exception:
         return False
+
+
+def _check_is_converging(project_dir: Path, iteration: int) -> bool:
+    """Check if recent iterations show convergence (repeating approaches).
+
+    Uses Jaccard similarity on seed keywords and approach category streaks.
+    Reads thresholds from .workflow.json exploration config.
+    """
+    log_path = convergence_log_path(project_dir)
+    if not log_path.exists():
+        return False
+
+    try:
+        log_data = json.loads(log_path.read_text())
+        entries = log_data.get("entries", [])
+    except Exception:
+        return False
+
+    # Load exploration config from workflow
+    from .paths import workflow_path
+    config: dict[str, Any] = {}
+    wp = workflow_path(project_dir)
+    if wp.exists():
+        try:
+            wf = json.loads(wp.read_text())
+            config = wf.get("exploration", {})
+        except Exception:
+            pass
+
+    window = config.get("convergence_window", 3)
+    similarity_threshold = config.get("similarity_threshold", 0.7)
+    force_after = config.get("force_explore_after", 5)
+
+    if len(entries) < window:
+        return False
+
+    recent = entries[-window:]
+
+    # Check 1: same approach_category streak
+    categories = [e.get("approach_category", "") for e in entries]
+    if len(categories) >= force_after and len(set(categories[-force_after:])) == 1:
+        return True
+
+    # Check 2: Jaccard similarity of seed keywords
+    recent_kw = [set(e.get("seed_keywords", [])) for e in recent]
+    similarities: list[float] = []
+    for i in range(len(recent_kw) - 1):
+        a, b = recent_kw[i], recent_kw[i + 1]
+        union = len(a | b)
+        if union > 0:
+            similarities.append(len(a & b) / union)
+    if similarities:
+        avg_sim = sum(similarities) / len(similarities)
+        if avg_sim > similarity_threshold:
+            return True
+
+    return False

@@ -37,7 +37,7 @@ class TestEngineInit:
         engine._init()
         assert (iter_dir(project_dir, 1)).exists()
         ls = load_state(project_dir)
-        assert ls.state == "DOMAIN_RESEARCH"
+        assert ls.state == "SHAPE_FULL"
         assert ls.current_iteration == 1
 
     def test_resume_from_existing_state(self, project_dir):
@@ -70,10 +70,10 @@ class TestCheckpointAutonomous:
 
         assert result.transition == "PHASE_SELECT"
 
-    def test_mandatory_checkpoint_waits_for_intervention(self, project_dir):
-        """Mandatory PLAN_REVIEW waits even in autonomous mode."""
+    def test_checkpoint_reads_intervention(self, project_dir):
+        """CHECKPOINT reads intervention file and transitions accordingly."""
         (iter_dir(project_dir, 1)).mkdir(parents=True)
-        save_state(project_dir, LoopState(state="PLAN_REVIEW", current_iteration=1))
+        save_state(project_dir, LoopState(state="CHECKPOINT", current_iteration=1))
 
         # Pre-write intervention so it doesn't hang
         from tiny_lab.paths import intervention_path
@@ -82,8 +82,7 @@ class TestCheckpointAutonomous:
         ipath.write_text(json.dumps({"action": "approve"}))
 
         engine = make_engine(project_dir)
-        spec = engine.workflow.get_state("PLAN_REVIEW")
-        assert spec.mandatory is True
+        spec = engine.workflow.get_state("CHECKPOINT")
 
         ls = load_state(project_dir)
         from tiny_lab.handlers.checkpoint import CheckpointHandler

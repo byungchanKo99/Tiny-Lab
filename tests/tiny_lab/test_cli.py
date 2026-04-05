@@ -14,8 +14,8 @@ class TestInit:
         _cmd_init(tmp_path, "ml-experiment")
 
         assert (tmp_path / "research" / ".workflow.json").exists()
-        assert (tmp_path / ".claude" / "hooks" / "state-gate.sh").exists()
-        assert (tmp_path / ".claude" / "hooks" / "state-advance.sh").exists()
+        assert (tmp_path / ".claude" / "hooks" / "state_gate.py").exists()
+        assert (tmp_path / ".claude" / "hooks" / "state_advance.py").exists()
         assert (tmp_path / "prompts" / "domain_research.md").exists()
         assert (tmp_path / "CLAUDE.md").exists()
         assert (tmp_path / "shared").exists()
@@ -26,8 +26,8 @@ class TestInit:
 
         settings = json.loads((tmp_path / ".claude" / "settings.json").read_text())
         hooks = settings["hooks"]
-        assert any("state-gate" in e["command"] for e in hooks["PreToolUse"])
-        assert any("state-advance" in e["command"] for e in hooks["PostToolUse"])
+        assert any("state_gate" in e["command"] for e in hooks["PreToolUse"])
+        assert any("state_advance" in e["command"] for e in hooks["PostToolUse"])
 
     def test_init_idempotent_hooks(self, tmp_path):
         from tiny_lab.cli import _cmd_init

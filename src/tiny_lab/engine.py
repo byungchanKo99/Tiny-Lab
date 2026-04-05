@@ -17,7 +17,7 @@ from .lock import Lock
 from .logging import log
 from .paths import (
     iter_dir, phases_dir, results_dir, research_dir,
-    workflow_path, shared_dir, iterations_path, reflect_path,
+    workflow_path, shared_dir, knowledge_dir, iterations_path, reflect_path,
 )
 from .plan import update_phase_status
 from .state import LoopState, load_state, save_state, set_state
@@ -27,11 +27,11 @@ from .workflow import StateSpec, load_workflow
 class Engine:
     """Tiny-lab state machine engine."""
 
-    def __init__(self, project_dir: Path, registry: HandlerRegistry) -> None:
+    def __init__(self, project_dir: Path, registry: HandlerRegistry, model: str = "sonnet") -> None:
         self.project_dir = project_dir
         self.workflow = load_workflow(workflow_path(project_dir))
         self.registry = registry
-        self.ctx = EngineContext(project_dir=project_dir, workflow=self.workflow)
+        self.ctx = EngineContext(project_dir=project_dir, workflow=self.workflow, model=model)
         self._shutdown = False
 
     def run(self) -> None:
@@ -46,6 +46,7 @@ class Engine:
     def _init(self) -> None:
         research_dir(self.project_dir).mkdir(parents=True, exist_ok=True)
         shared_dir(self.project_dir).mkdir(parents=True, exist_ok=True)
+        knowledge_dir(self.project_dir).mkdir(parents=True, exist_ok=True)
 
         ls = load_state(self.project_dir)
         if ls.state == "INIT":
@@ -72,9 +73,14 @@ class Engine:
                 break
 
             if ls.current_iteration > self.workflow.autonomy.max_iterations:
-                log(f"ENGINE: max iterations ({self.workflow.autonomy.max_iterations}) reached")
-                set_state(self.project_dir, "DONE", resumable=False)
-                break
+                # Don't cut off if we're in the synthesis/evaluation tail
+                if ls.state not in ("STORY_TELL", "REVIEW", "REVIEW_DONE"):
+                    log(f"ENGINE: max iterations ({self.workflow.autonomy.max_iterations}) reached → STORY_TELL")
+                    if "STORY_TELL" in self.workflow._index:
+                        set_state(self.project_dir, "STORY_TELL")
+                    else:
+                        set_state(self.project_dir, "DONE", resumable=False)
+                        break
 
             try:
                 spec = self.workflow.get_state(ls.state)
@@ -122,6 +128,7 @@ class Engine:
                 self._create_iteration(new_iter)
                 self._carry_over(ls.current_iteration, new_iter, result.transition)
                 overrides["current_iteration"] = new_iter
+                overrides["session_id"] = None  # fresh session for new iteration
             set_state(self.project_dir, result.transition, **overrides)
         else:
             # Save overrides first (e.g. PHASE_SELECT setting current_phase_id)
@@ -131,10 +138,17 @@ class Engine:
             # Then follow spec.next
             self._follow_next(spec, ls)
 
+    # States that start a fresh context (session reset)
+    _SESSION_RESET_STATES = frozenset({
+        "SHAPE_FULL",       # 연구 처음 시작 / REJECT 재시작
+        "PHASE_SELECT",     # phase loop 진입 — plan까지의 맥락 정리
+        "STORY_TELL",       # 최종 논문 — 모든 iter 결과를 파일에서 새로 읽음
+    })
+
     def _follow_next(self, spec: StateSpec, ls: LoopState) -> None:
         """Evaluate and apply spec.next transition."""
         if isinstance(spec.next, str):
-            set_state(self.project_dir, spec.next)
+            nxt = spec.next
         elif isinstance(spec.next, dict) and spec.condition:
             from .conditions import resolve_condition
             current_ls = load_state(self.project_dir)
@@ -142,7 +156,13 @@ class Engine:
                 spec.condition, spec.next,
                 self.project_dir, current_ls.current_iteration,
             )
-            set_state(self.project_dir, nxt)
+        else:
+            return
+
+        overrides: dict[str, Any] = {}
+        if nxt in self._SESSION_RESET_STATES:
+            overrides["session_id"] = None
+        set_state(self.project_dir, nxt, **overrides)
 
     # ------------------------------------------------------------------
     # Error handling
@@ -174,7 +194,7 @@ class Engine:
         if on_exhaust == "skip_phase" and ls.current_phase_id:
             log(f"ENGINE: skipping phase {ls.current_phase_id}")
             update_phase_status(self.project_dir, ls.current_iteration, ls.current_phase_id, "skipped")
-            set_state(self.project_dir, "PHASE_SELECT", current_phase_id=None, phase_retries=0, session_id=None)
+            set_state(self.project_dir, "PHASE_SELECT", current_phase_id=None, phase_retries=0)
         elif on_exhaust == "ask":
             log("ENGINE: waiting for intervention after error")
             set_state(self.project_dir, "CHECKPOINT")

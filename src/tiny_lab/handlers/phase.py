@@ -11,7 +11,7 @@ from typing import Any
 from .. import events
 from ..errors import StateError
 from ..logging import log
-from ..paths import phases_dir, results_dir, intervention_path
+from ..paths import phases_dir, results_dir, intervention_path, knowledge_dir
 from ..plan import load_plan, next_pending_phase, update_phase_status
 from ..state import LoopState
 from ..workflow import StateSpec
@@ -42,7 +42,7 @@ class PhaseSelectHandler:
             events.phase_started(ctx.project_dir, phase_id, ls.current_iteration)
             log(f"ENGINE: selected phase {phase_id} — {phase.get('name', '')}")
             return StateResult(
-                state_overrides={"current_phase_id": phase_id, "phase_retries": 0, "session_id": None},
+                state_overrides={"current_phase_id": phase_id, "phase_retries": 0},
             )
         else:
             log("ENGINE: no pending phases")
@@ -104,6 +104,7 @@ def _run_script(phase: dict[str, Any], ls: LoopState, ctx: EngineContext) -> Non
             "TINYLAB_PROJECT_DIR": str(ctx.project_dir),
             "TINYLAB_RESULTS_DIR": str(rdir),
             "TINYLAB_ITERATION": str(ls.current_iteration),
+            "TINYLAB_KNOWLEDGE_DIR": str(knowledge_dir(ctx.project_dir)),
         },
     )
 

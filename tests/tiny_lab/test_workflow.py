@@ -135,14 +135,15 @@ class TestValidateWorkflow:
         with pytest.raises(WorkflowError, match="invalid type"):
             load_workflow(path)
 
-    def test_ai_session_dict_next_rejected(self, tmp_workflow):
+    def test_ai_session_dict_next_requires_condition(self, tmp_workflow):
+        """ai_session with dict next must have a condition."""
         path = tmp_workflow({
             "states": [{
                 "id": "A", "type": "ai_session",
                 "next": {"a": "B", "b": "C"},
             }],
         })
-        with pytest.raises(WorkflowError, match="single"):
+        with pytest.raises(WorkflowError, match="condition"):
             load_workflow(path)
 
     def test_dict_next_without_condition(self, tmp_workflow):
