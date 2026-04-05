@@ -17,6 +17,31 @@
     "checkpoint": "between_phases",
     "timeout_seconds": 3600
   },
+  "board": {
+    "title": "ML Experiment",
+    "metric_keys": [
+      "test_mae",
+      "test_mae_C",
+      "test_rmse",
+      "test_rmse_C",
+      "test_accuracy",
+      "cv_accuracy_mean",
+      "val_mae_C"
+    ],
+    "flag_keys": ["beats_naive", "beats_ma", "target_achieved"],
+    "sections": [
+      "constraints",
+      "convergence",
+      "plan",
+      "validation",
+      "results",
+      "understanding",
+      "reflect",
+      "history",
+      "paper",
+      "events"
+    ]
+  },
   "states": [
     {
       "id": "SHAPE_FULL",

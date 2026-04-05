@@ -1,28 +1,76 @@
 {
   "autonomy": {
-    "mode": "supervised",
-    "max_iterations": 3,
-    "allow_idea_mutation": false,
+    "mode": "autonomous",
+    "max_iterations": 10,
+    "allow_idea_mutation": true,
     "stop_on_target": false,
     "circuit_breaker": {
-      "max_consecutive_failures": 3
+      "max_consecutive_failures": 12
     }
+  },
+  "exploration": {
+    "convergence_window": 3,
+    "similarity_threshold": 0.7,
+    "force_explore_after": 5
   },
   "intervention": {
     "checkpoint": "between_phases",
-    "timeout_seconds": 7200
+    "timeout_seconds": 3600
+  },
+  "board": {
+    "title": "Review Paper",
+    "metric_keys": ["total_found", "after_screening", "papers_analyzed"],
+    "flag_keys": [],
+    "sections": [
+      "constraints",
+      "convergence",
+      "review_progress",
+      "validation",
+      "understanding",
+      "reflect",
+      "history",
+      "paper",
+      "events"
+    ],
+    "custom_sections": {
+      "review_progress": {
+        "files": [
+          ".scope.json",
+          ".papers_collected.json",
+          ".paper_analysis.json",
+          ".taxonomy.json"
+        ],
+        "labels": ["Scope", "Papers Collected", "Analysis", "Taxonomy"]
+      }
+    }
   },
   "states": [
+    {
+      "id": "SHAPE_FULL",
+      "type": "ai_session",
+      "prompt": "prompts/_shared/shape_full.md",
+      "allowed_tools": ["Read", "Write", "WebSearch", "WebFetch"],
+      "interactive": true,
+      "interactive_fallback": "interactive",
+      "allowed_write_globs": [
+        "research/.shaped_input.json",
+        "research/constraints.json"
+      ],
+      "completion": {
+        "artifact": "research/constraints.json",
+        "required_fields": ["objective", "goal", "invariants"]
+      },
+      "error": { "max_retries": 5, "on_exhaust": "stop" },
+      "next": "SCOPE_DEFINITION"
+    },
     {
       "id": "SCOPE_DEFINITION",
       "type": "ai_session",
       "prompt": "prompts/review/scope.md",
-      "allowed_tools": [
-        "Read",
-        "Write"
-      ],
+      "allowed_tools": ["Read", "Write", "WebSearch"],
       "allowed_write_globs": [
-        "research/{iter}/.scope.json"
+        "research/{iter}/.scope.json",
+        "shared/knowledge/*"
       ],
       "completion": {
         "artifact": "research/{iter}/.scope.json",
@@ -32,122 +80,165 @@
           "exclusion_criteria"
         ]
       },
+      "error": { "max_retries": 5, "on_exhaust": "stop" },
       "next": "LITERATURE_SEARCH"
     },
     {
       "id": "LITERATURE_SEARCH",
       "type": "ai_session",
       "prompt": "prompts/review/literature_search.md",
-      "allowed_tools": [
-        "WebSearch",
-        "WebFetch",
-        "Read",
-        "Write"
-      ],
+      "allowed_tools": ["WebSearch", "WebFetch", "Read", "Write"],
       "allowed_write_globs": [
-        "research/{iter}/.papers_collected.json"
+        "research/{iter}/.papers_collected.json",
+        "shared/knowledge/*"
       ],
       "completion": {
         "artifact": "research/{iter}/.papers_collected.json",
-        "required_fields": [
-          "papers",
-          "total_found",
-          "after_screening"
-        ]
+        "required_fields": ["papers", "total_found", "after_screening"]
       },
-      "error": {
-        "max_retries": 2,
-        "on_exhaust": "ask"
-      },
+      "error": { "max_retries": 5, "on_exhaust": "stop" },
       "next": "PAPER_ANALYSIS"
     },
     {
       "id": "PAPER_ANALYSIS",
       "type": "ai_session",
       "prompt": "prompts/review/analysis.md",
-      "allowed_tools": [
-        "Read",
-        "Write"
-      ],
-      "allowed_write_globs": [
-        "research/{iter}/.paper_analysis.json"
-      ],
+      "allowed_tools": ["Read", "Write"],
+      "allowed_write_globs": ["research/{iter}/.paper_analysis.json"],
       "completion": {
         "artifact": "research/{iter}/.paper_analysis.json",
-        "required_fields": [
-          "themes",
-          "comparisons",
-          "gaps"
-        ]
+        "required_fields": ["themes", "comparisons", "gaps"]
       },
+      "error": { "max_retries": 5, "on_exhaust": "stop" },
       "next": "TAXONOMY"
     },
     {
       "id": "TAXONOMY",
       "type": "ai_session",
       "prompt": "prompts/review/taxonomy.md",
-      "allowed_tools": [
-        "Read",
-        "Write"
-      ],
-      "allowed_write_globs": [
-        "research/{iter}/.taxonomy.json"
-      ],
+      "allowed_tools": ["Read", "Write"],
+      "allowed_write_globs": ["research/{iter}/.taxonomy.json"],
       "completion": {
         "artifact": "research/{iter}/.taxonomy.json",
-        "required_fields": [
-          "categories",
-          "classification_criteria"
-        ]
+        "required_fields": ["categories", "classification_criteria"]
       },
-      "next": "SYNTHESIS"
+      "error": { "max_retries": 5, "on_exhaust": "stop" },
+      "next": "VALIDATE_PLAN"
+    },
+    {
+      "id": "VALIDATE_PLAN",
+      "type": "ai_session",
+      "prompt": "prompts/review/validate_review.md",
+      "allowed_tools": ["Read", "Write"],
+      "allowed_write_globs": ["research/{iter}/.plan_validation.json"],
+      "completion": {
+        "artifact": "research/{iter}/.plan_validation.json",
+        "required_fields": ["verdict", "checks"]
+      },
+      "error": { "max_retries": 3, "on_exhaust": "stop" },
+      "condition": {
+        "source": "{iter}/.plan_validation.json",
+        "field": "verdict"
+      },
+      "next": {
+        "APPROVE": "SYNTHESIS",
+        "REJECT": "LITERATURE_SEARCH"
+      }
     },
     {
       "id": "SYNTHESIS",
       "type": "ai_session",
       "prompt": "prompts/review/synthesis.md",
-      "allowed_tools": [
-        "Read",
-        "Write"
-      ],
-      "allowed_write_globs": [
-        "research/{iter}/review_draft.md"
-      ],
+      "allowed_tools": ["Read", "Write"],
+      "allowed_write_globs": ["research/{iter}/review_draft.md"],
       "completion": {
         "artifact": "research/{iter}/review_draft.md"
       },
+      "error": { "max_retries": 5, "on_exhaust": "stop" },
       "next": "REFLECT"
     },
     {
       "id": "REFLECT",
       "type": "ai_session",
       "prompt": "prompts/reflect.md",
-      "allowed_tools": [
-        "Read",
-        "Write"
-      ],
+      "allowed_tools": ["Read", "Write"],
       "allowed_write_globs": [
-        "research/{iter}/reflect.json"
+        "research/{iter}/reflect.json",
+        "research/convergence_log.json"
       ],
       "completion": {
         "artifact": "research/{iter}/reflect.json",
-        "required_fields": [
-          "decision",
-          "reason"
-        ]
+        "required_fields": ["decision", "reason"]
       },
-      "next": "REFLECT_DONE"
+      "next": "SHAPE_SEED"
     },
     {
-      "id": "REFLECT_DONE",
+      "id": "SHAPE_SEED",
+      "type": "process",
+      "condition": { "check": "is_converging" },
+      "next": { "true": "EXPLORE", "false": "ROUTE" }
+    },
+    {
+      "id": "EXPLORE",
+      "type": "ai_session",
+      "prompt": "prompts/_shared/explore.md",
+      "allowed_tools": ["Read", "Write"],
+      "allowed_write_globs": ["research/{iter}/.explore_seed.json"],
+      "completion": {
+        "artifact": "research/{iter}/.explore_seed.json",
+        "required_fields": ["new_seed", "rationale"]
+      },
+      "error": { "max_retries": 3, "on_exhaust": "skip" },
+      "next": "SCOPE_DEFINITION"
+    },
+    {
+      "id": "ROUTE",
       "type": "process",
       "condition": {
         "source": "{iter}/reflect.json",
         "field": "decision"
       },
       "next": {
-        "done": "DONE",
-        "more_search": "LITERATURE_SEARCH"
+        "done": "STORY_TELL",
+        "more_search": "LITERATURE_SEARCH",
+        "idea_mutation": "SCOPE_DEFINITION",
+        "add_phases": "LITERATURE_SEARCH"
+      }
+    },
+    {
+      "id": "STORY_TELL",
+      "type": "ai_session",
+      "prompt": "prompts/review/story_tell_review.md",
+      "allowed_tools": ["Read", "Write"],
+      "allowed_write_globs": ["research/final_paper.md"],
+      "completion": { "artifact": "research/final_paper.md" },
+      "error": { "max_retries": 5, "on_exhaust": "stop" },
+      "next": "REVIEW"
+    },
+    {
+      "id": "REVIEW",
+      "type": "ai_session",
+      "prompt": "prompts/review/professor_review.md",
+      "allowed_tools": ["Read", "Write"],
+      "allowed_write_globs": ["research/evaluation.json"],
+      "completion": {
+        "artifact": "research/evaluation.json",
+        "required_fields": ["verdict", "scores"]
+      },
+      "error": { "max_retries": 3, "on_exhaust": "stop" },
+      "next": "REVIEW_DONE"
+    },
+    {
+      "id": "REVIEW_DONE",
+      "type": "process",
+      "condition": {
+        "source": "evaluation.json",
+        "field": "verdict"
+      },
+      "next": {
+        "ACCEPT": "DONE",
+        "REVISE": "LITERATURE_SEARCH",
+        "REJECT": "SHAPE_FULL"
       }
     }
   ]

@@ -413,7 +413,7 @@ def _cmd_fork(project_dir: Path, enter: str | None, idea: str | None, source_ite
 def _cmd_board(project_dir: Path, iteration: int | None) -> None:
     """Show results dashboard."""
     from .state import load_state
-    from .paths import results_dir, iterations_path, iter_dir, plan_path
+    from .paths import results_dir, iterations_path, iter_dir, plan_path, workflow_path
     from .events import load_events
     import json
 
@@ -422,8 +422,24 @@ def _cmd_board(project_dir: Path, iteration: int | None) -> None:
 
     from .paths import constraints_path, convergence_log_path
 
+    # Load board config from workflow
+    board_cfg: dict = {}
+    wp = workflow_path(project_dir)
+    if wp.exists():
+        wf_data = json.loads(wp.read_text())
+        board_cfg = wf_data.get("board", {})
+
+    board_title = board_cfg.get("title", "Research")
+    board_sections = board_cfg.get("sections", [
+        "constraints", "convergence", "plan", "validation", "results",
+        "understanding", "reflect", "history", "paper", "events",
+    ])
+    preset_metric_keys = board_cfg.get("metric_keys", [])
+    preset_flag_keys = set(board_cfg.get("flag_keys", []))
+    custom_sections = board_cfg.get("custom_sections", {})
+
     # Header
-    print(f"tiny-lab v7 — Iteration {target_iter}")
+    print(f"tiny-lab v7 [{board_title}] — Iteration {target_iter}")
     print(f"State: {ls.state}")
     if ls.current_phase_id:
         print(f"Current phase: {ls.current_phase_id}")
@@ -495,7 +511,7 @@ def _cmd_board(project_dir: Path, iteration: int | None) -> None:
                        "rows_raw", "rows_after_dedup", "rows_hourly", "n_duplicates_removed",
                        "n_sentinel_wv_fixed", "n_sentinel_maxwv_fixed", "nan_rows_before_interp",
                        "nan_rows_after_interp", "target_col_index"}
-        _FLAG_KEYS = {"beats_naive", "beats_ma", "target_achieved"}
+        _FLAG_KEYS = preset_flag_keys or {"beats_naive", "beats_ma", "target_achieved"}
         rows: list[tuple[str, dict, list[str]]] = []
         for f in sorted(rdir.glob("*.json")):
             try:
@@ -518,14 +534,17 @@ def _cmd_board(project_dir: Path, iteration: int | None) -> None:
                 pass
 
         if rows:
-            # Find metric columns that appear in 2+ rows (shared metrics)
-            from collections import Counter
-            key_counts = Counter(k for _, m, _ in rows for k in m)
-            shared_keys = [k for k, c in key_counts.most_common() if c >= 2]
-            # If no shared keys, use all keys from all rows
-            if not shared_keys:
-                shared_keys = list(dict.fromkeys(k for _, m, _ in rows for k in m))
-            display_keys = shared_keys[:4]
+            # Use preset metric_keys if specified, otherwise auto-detect
+            if preset_metric_keys:
+                all_row_keys = set(k for _, m, _ in rows for k in m)
+                display_keys = [k for k in preset_metric_keys if k in all_row_keys][:4]
+            if not preset_metric_keys or not display_keys:
+                from collections import Counter
+                key_counts = Counter(k for _, m, _ in rows for k in m)
+                shared_keys = [k for k, c in key_counts.most_common() if c >= 2]
+                if not shared_keys:
+                    shared_keys = list(dict.fromkeys(k for _, m, _ in rows for k in m))
+                display_keys = shared_keys[:4]
 
             print("Results:")
             header = f"  {'Model':<25s}"
@@ -555,6 +574,38 @@ def _cmd_board(project_dir: Path, iteration: int | None) -> None:
     present = [a for a in artifacts if idir.exists() and (idir / a).exists()]
     if present:
         print(f"Understanding: {', '.join(a.replace('.json', '').lstrip('.') for a in present)}")
+
+    # Custom sections from preset board config
+    for sec_name, sec_cfg in custom_sections.items():
+        files = sec_cfg.get("files", [])
+        labels = sec_cfg.get("labels", files)
+        items = []
+        for fname, label in zip(files, labels):
+            fpath = idir / fname if idir.exists() else None
+            if fpath and fpath.exists():
+                try:
+                    data = json.loads(fpath.read_text())
+                    # Show key counts for dicts/lists
+                    if isinstance(data, dict):
+                        summary_parts = []
+                        for k, v in data.items():
+                            if isinstance(v, list):
+                                summary_parts.append(f"{k}: {len(v)}")
+                            elif isinstance(v, (int, float)):
+                                summary_parts.append(f"{k}: {v}")
+                            elif isinstance(v, str) and len(v) < 60:
+                                summary_parts.append(f"{k}: {v}")
+                        items.append(f"  ✓ {label}: {', '.join(summary_parts[:4])}")
+                    else:
+                        items.append(f"  ✓ {label}")
+                except Exception:
+                    items.append(f"  ✓ {label} (exists)")
+            else:
+                items.append(f"  ○ {label} (pending)")
+        if items:
+            print(f"\n{sec_name.replace('_', ' ').title()}:")
+            for item in items:
+                print(item)
 
     # Reflect
     reflect_file = idir / "reflect.json" if idir.exists() else None
