@@ -87,6 +87,14 @@ Actions:
     intervene_p.add_argument("action", choices=["approve", "skip", "modify", "stop", "add-phase"])
     intervene_p.add_argument("args", nargs="*")
 
+    # report
+    report_p = sub.add_parser("report", help="Report a bug/issue to GitHub",
+                              description="Collect context (state, logs, errors) and create a GitHub issue.")
+    report_p.add_argument("title", help="Issue title")
+    report_p.add_argument("--body", default="", help="Additional description")
+    report_p.add_argument("--label", default="bug", choices=["bug", "enhancement", "question"],
+                          help="Issue label (default: bug)")
+
     args = parser.parse_args()
     project_dir = Path.cwd()
 
@@ -108,6 +116,8 @@ Actions:
         _cmd_board(project_dir, args.iter)
     elif args.command == "intervene":
         _cmd_intervene(project_dir, args.action, args.args)
+    elif args.command == "report":
+        _cmd_report(project_dir, args.title, args.body, args.label)
     else:
         parser.print_help()
 
@@ -661,3 +671,89 @@ def _cmd_intervene(project_dir: Path, action: str, extra_args: list[str]) -> Non
     ipath.parent.mkdir(parents=True, exist_ok=True)
     ipath.write_text(json.dumps(intervention, indent=2))
     print(f"Intervention sent: {action}")
+
+
+_REPO = "byungchanKo99/Tiny-Lab"
+
+
+def _cmd_report(project_dir: Path, title: str, body: str, label: str) -> None:
+    """Collect context and create a GitHub issue."""
+    import json
+    import subprocess
+    from .state import load_state
+    from .paths import research_dir
+
+    # Collect context
+    sections = [body] if body else []
+
+    # State
+    ls = load_state(project_dir)
+    sections.append(
+        f"## Environment\n"
+        f"- **State**: `{ls.state}` (iter={ls.current_iteration})\n"
+        f"- **Phase**: `{ls.current_phase_id or 'none'}`\n"
+        f"- **Retries**: {ls.phase_retries}, failures: {ls.consecutive_failures}"
+    )
+
+    # Version
+    try:
+        from . import __version__
+        sections.append(f"- **Version**: {__version__}")
+    except Exception:
+        pass
+
+    # Last 20 log lines
+    log_file = research_dir(project_dir) / "loop.log"
+    if log_file.exists():
+        lines = log_file.read_text().strip().splitlines()[-20:]
+        sections.append(f"## Recent Log\n```\n" + "\n".join(lines) + "\n```")
+
+    # Phase error if exists
+    error_file = (
+        research_dir(project_dir) / f"iter_{ls.current_iteration}" / ".phase_error.json"
+    )
+    if error_file.exists():
+        try:
+            err = json.loads(error_file.read_text())
+            last = err[-1] if isinstance(err, list) else err
+            sections.append(
+                f"## Last Phase Error\n"
+                f"- Script: `{last.get('script', '?')}`\n"
+                f"- Exit code: {last.get('exit_code', '?')}\n"
+                f"```\n{last.get('stderr', '')[:500]}\n```"
+            )
+        except Exception:
+            pass
+
+    # Constraints
+    cpath = research_dir(project_dir) / "constraints.json"
+    if cpath.exists():
+        try:
+            c = json.loads(cpath.read_text())
+            sections.append(f"## Constraints\n- Objective: {c.get('objective', '?')}")
+        except Exception:
+            pass
+
+    full_body = "\n\n".join(sections)
+
+    # Create issue via gh
+    cmd = [
+        "gh", "issue", "create",
+        "--repo", _REPO,
+        "--title", title,
+        "--body", full_body,
+        "--label", label,
+    ]
+
+    print(f"Creating issue: {title}")
+    print(f"Label: {label}")
+    print(f"Context: state={ls.state}, iter={ls.current_iteration}")
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode == 0:
+        url = result.stdout.strip()
+        print(f"Issue created: {url}")
+    else:
+        print(f"Failed to create issue: {result.stderr.strip()}")
+        print("Make sure 'gh' CLI is installed and authenticated.")
+        print(f"\nFull body (copy to GitHub manually):\n{'─'*40}\n{full_body}")

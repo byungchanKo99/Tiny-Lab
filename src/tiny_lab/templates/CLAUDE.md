@@ -137,6 +137,36 @@ tiny-lab board
 4. **전략적 리셋** — PHASE_SELECT, STORY_TELL 진입 시 세션 리셋 (context 관리)
 5. **Professor 평가** — 최종 논문을 평가하고 ACCEPT/REVISE/REJECT 판정
 
+## 문제 감지 & 이슈 리포트
+
+유저가 다음과 같은 신호를 보내면 **이슈 리포트를 제안하라**:
+
+- "안 돼", "에러", "버그", "이상해", "멈췄어", "왜 이래"
+- 같은 phase가 3회 이상 실패
+- 엔진이 DONE(resumable=true)으로 멈춘 경우
+- 유저가 "불편하다", "이거 좀 고쳐줘", "개선 필요"
+
+**제안 방법:**
+
+```
+이 문제를 GitHub 이슈로 리포트할까요? 현재 상태와 로그를 자동으로 첨부합니다.
+```
+
+유저가 동의하면:
+
+```bash
+tiny-lab report "이슈 제목" --body "유저가 설명한 내용" --label bug
+```
+
+이 명령은 자동으로 수집한다:
+
+- 현재 state, iteration, phase
+- 최근 로그 20줄
+- 마지막 phase error (있으면)
+- constraints 요약
+
+`--label` 옵션: `bug` (기본), `enhancement`, `question`
+
 ## CLI 명령어 레퍼런스
 
 | Command                                       | Description                                                             |
@@ -150,3 +180,4 @@ tiny-lab board
 | `tiny-lab resume`                             | 재개                                                                    |
 | `tiny-lab fork [--enter STATE]`               | 새 iteration 분기                                                       |
 | `tiny-lab intervene approve/skip/modify/stop` | checkpoint 개입                                                         |
+| `tiny-lab report "title" [--label bug]`       | GitHub 이슈 자동 생성 (상태+로그 첨부)                                  |

@@ -9,7 +9,7 @@ Shape → Gather → [Execute → Reflect → Diversify]↺ → Synthesize → E
 ## Install
 
 ```bash
-pip install git+https://github.com/byungchanko/Tiny-Lab.git
+pip install git+https://github.com/byungchanKo99/Tiny-Lab.git
 ```
 
 **필수**: Python 3.10+ / [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
