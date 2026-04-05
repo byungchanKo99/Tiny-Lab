@@ -446,17 +446,15 @@ def _cmd_board(project_dir: Path, iteration: int | None) -> None:
                 print(f"  ✗ {b.get('criterion', '?')}: {b.get('description', '')[:70]}")
         print()
 
-    # Results — extract key metrics for comparison table
+    # Results — auto-extract numeric metrics for comparison table
     rdir = results_dir(project_dir, target_iter)
     if rdir.exists() and list(rdir.glob("*.json")):
-        # Collect metric columns across all results
-        _METRIC_KEYS = [
-            "test_mae_C", "test_mae", "mae", "MAE",
-            "test_rmse_C", "test_rmse", "rmse", "RMSE",
-            "test_accuracy", "accuracy", "cv_accuracy_mean",
-            "better_baseline_mae_C",
-        ]
-        rows: list[tuple[str, dict]] = []
+        _SKIP_KEYS = {"phase", "status", "n_features", "n_parameters", "train_time_seconds",
+                       "rows_raw", "rows_after_dedup", "rows_hourly", "n_duplicates_removed",
+                       "n_sentinel_wv_fixed", "n_sentinel_maxwv_fixed", "nan_rows_before_interp",
+                       "nan_rows_after_interp", "target_col_index"}
+        _FLAG_KEYS = {"beats_naive", "beats_ma", "target_achieved"}
+        rows: list[tuple[str, dict, list[str]]] = []
         for f in sorted(rdir.glob("*.json")):
             try:
                 data = json.loads(f.read_text())
@@ -464,71 +462,50 @@ def _cmd_board(project_dir: Path, iteration: int | None) -> None:
                     continue
                 model = data.get("model_id", data.get("model", f.stem))
                 metrics = {}
-                for k in _METRIC_KEYS:
-                    if k in data and isinstance(data[k], (int, float)):
-                        metrics[k] = data[k]
-                # Also grab status and beats flags
-                for k in ("beats_naive", "beats_ma", "target_achieved", "status"):
-                    if k in data:
-                        metrics[k] = data[k]
+                flags = []
+                for k, v in data.items():
+                    if k in _SKIP_KEYS:
+                        continue
+                    if k in _FLAG_KEYS and v is True:
+                        flags.append(f"✓{k.replace('beats_', '').replace('target_', '')}")
+                    elif isinstance(v, float):
+                        metrics[k] = v
                 if metrics:
-                    rows.append((str(model), metrics))
+                    rows.append((str(model), metrics, flags))
             except Exception:
                 pass
 
         if rows:
-            # Find common metric columns
-            all_keys = []
-            for _, m in rows:
-                for k in m:
-                    if k not in all_keys and isinstance(m[k], (int, float)):
-                        all_keys.append(k)
+            # Find metric columns that appear in 2+ rows (shared metrics)
+            from collections import Counter
+            key_counts = Counter(k for _, m, _ in rows for k in m)
+            shared_keys = [k for k, c in key_counts.most_common() if c >= 2]
+            # If no shared keys, use all keys from all rows
+            if not shared_keys:
+                shared_keys = list(dict.fromkeys(k for _, m, _ in rows for k in m))
+            display_keys = shared_keys[:4]
 
             print("Results:")
-            # Header
             header = f"  {'Model':<25s}"
-            for k in all_keys[:4]:  # max 4 metric columns
-                header += f" {k:>12s}"
+            for k in display_keys:
+                header += f" {k:>14s}"
             print(header)
-            print(f"  {'─'*25}" + "─" * (13 * min(len(all_keys), 4)))
+            print(f"  {'─'*25}" + "─" * (15 * len(display_keys)))
 
-            for model, metrics in rows:
+            for model, metrics, flags in rows:
                 row = f"  {model:<25s}"
-                for k in all_keys[:4]:
+                for k in display_keys:
                     v = metrics.get(k)
                     if isinstance(v, float):
-                        row += f" {v:>12.4f}"
-                    elif v is not None:
-                        row += f" {str(v):>12s}"
+                        row += f" {v:>14.4f}"
                     else:
-                        row += f" {'—':>12s}"
-                # Append flags
-                flags = []
-                if metrics.get("beats_naive"):
-                    flags.append("✓naive")
-                if metrics.get("beats_ma"):
-                    flags.append("✓ma")
-                if metrics.get("target_achieved"):
-                    flags.append("✓goal")
+                        row += f" {'—':>14s}"
                 if flags:
                     row += f"  [{', '.join(flags)}]"
                 print(row)
             print()
         else:
-            # Fallback: show raw
-            print("Results:")
-            for f in sorted(rdir.glob("*.json")):
-                try:
-                    data = json.loads(f.read_text())
-                    parts = []
-                    for k, v in data.items():
-                        if isinstance(v, float):
-                            parts.append(f"{k}={v:.4f}")
-                        elif not isinstance(v, (list, dict)):
-                            parts.append(f"{k}={v}")
-                    print(f"  {f.stem}: {', '.join(parts[:6])}")
-                except Exception:
-                    print(f"  {f.stem}: (parse error)")
+            print("Results: (no numeric metrics found)")
             print()
 
     # Understanding artifacts
