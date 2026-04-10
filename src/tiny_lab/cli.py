@@ -187,6 +187,13 @@ def _cmd_init(project_dir: Path, preset: str) -> None:
     _register_hooks(project_dir)
     print(f"Hooks installed: {hooks_dst}")
 
+    # Reset state (so re-init works cleanly)
+    from .paths import state_path
+    sp = state_path(project_dir)
+    if sp.exists():
+        sp.unlink()
+        print("State reset: .state.json cleared")
+
     # Copy prompt templates
     prompts_src = Path(__file__).parent / "prompts"
     prompts_dst = project_dir / "prompts"
@@ -297,11 +304,25 @@ def _cmd_shape(project_dir: Path, constraints_file: str) -> None:
     (idir / "phases").mkdir(exist_ok=True)
     (idir / "results").mkdir(exist_ok=True)
 
-    # Set state past SHAPE_FULL
+    # Set state past SHAPE_FULL — read next state from workflow
+    from .paths import workflow_path
     ls = load_state(project_dir)
     if ls.state in ("INIT", "SHAPE_FULL"):
-        set_state(project_dir, "DOMAIN_RESEARCH", current_iteration=1)
-        print("State: → DOMAIN_RESEARCH (skipped SHAPE_FULL)")
+        next_state = "DOMAIN_RESEARCH"  # default fallback
+        wp = workflow_path(project_dir)
+        if wp.exists():
+            wf_data = json.loads(wp.read_text())
+            for s in wf_data.get("states", []):
+                if s.get("id") == "SHAPE_FULL":
+                    next_state = s.get("next", next_state)
+                    break
+            else:
+                # No SHAPE_FULL — use first state
+                states = wf_data.get("states", [])
+                if states:
+                    next_state = states[0]["id"]
+        set_state(project_dir, next_state, current_iteration=1)
+        print(f"State: → {next_state} (skipped SHAPE_FULL)")
     else:
         print(f"State unchanged: {ls.state} (not in INIT/SHAPE_FULL)")
 
