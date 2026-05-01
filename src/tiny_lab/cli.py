@@ -118,6 +118,16 @@ Actions:
     vr_p.add_argument("--strict", action="store_true",
                       help="Exit non-zero if any reference is not_found")
 
+    # timeline
+    tl_p = sub.add_parser("timeline", help="Retrospective timeline of all iterations",
+                          description="Build a markdown table summarizing every iteration's "
+                                      "topic, delta classification, trigger, decision, and best "
+                                      "result. Reads each iter_*/reflect.json + the iteration's "
+                                      "hypothesis_log if present. Use this for a one-glance view "
+                                      "of how the research thinking has evolved.")
+    tl_p.add_argument("--out", default="research/timeline.md",
+                      help="Output path (default: research/timeline.md). Use '-' for stdout.")
+
     # report
     report_p = sub.add_parser("report", help="Report a bug/issue to GitHub",
                               description="Collect context (state, logs, errors) and create a GitHub issue.")
@@ -153,6 +163,8 @@ Actions:
         _cmd_verify_refs(project_dir, args.iter, args.file, args.no_write, args.strict)
     elif args.command == "novelty":
         _cmd_novelty(project_dir, args.iter, args.years, args.write)
+    elif args.command == "timeline":
+        _cmd_timeline(project_dir, args.out)
     else:
         parser.print_help()
 
@@ -1119,6 +1131,113 @@ def _cmd_novelty(
             "candidates": results,
         }, indent=2, ensure_ascii=False) + "\n")
         print(f"\nWrote: {out_path.relative_to(project_dir)}")
+
+
+def _cmd_timeline(project_dir: Path, out: str) -> None:
+    """Build the retrospective timeline table (v7.10).
+
+    Walks every iter_*/reflect.json (and the iteration's
+    .hypothesis_log.json if present) and emits a markdown table with
+    one row per iteration: topic / delta / trigger / decision / best
+    result / cycle length.
+    """
+    import json
+    from datetime import datetime
+    from .paths import research_dir
+
+    rd = research_dir(project_dir)
+    if not rd.exists():
+        print("No research/ directory — run `tiny-lab init` first.")
+        sys.exit(2)
+
+    rows: list[dict] = []
+    for d in sorted(rd.glob("iter_*")):
+        try:
+            iter_num = int(d.name.split("_", 1)[1])
+        except (IndexError, ValueError):
+            continue
+        rfile = d / "reflect.json"
+        if not rfile.exists():
+            continue
+        try:
+            r = json.loads(rfile.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        # Hypothesis log (optional — only present if HYPOTHESIS_UPDATE state ran)
+        hlog_file = d / "phases" / ".hypothesis_log.json"
+        n_phases = 0
+        cycle_len = ""
+        if hlog_file.exists():
+            try:
+                hlog = json.loads(hlog_file.read_text())
+                entries = hlog.get("entries", [])
+                n_phases = len(entries)
+                if len(entries) >= 2:
+                    first_ts = entries[0].get("ran_at")
+                    last_ts = entries[-1].get("ran_at")
+                    if first_ts and last_ts:
+                        try:
+                            t0 = datetime.fromisoformat(first_ts.replace("Z", "+00:00"))
+                            t1 = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
+                            cycle_len = f"{(t1 - t0).total_seconds() / 3600:.1f}h"
+                        except (ValueError, AttributeError):
+                            pass
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        best = r.get("best_result") or {}
+        metric_v = best.get("metric_value", "—")
+        if isinstance(metric_v, float):
+            metric_v = f"{metric_v:.4f}"
+
+        pivot = r.get("pivot_trigger") or {}
+        trigger_src = pivot.get("trigger_source", r.get("delta_trigger", "—"))
+
+        rows.append({
+            "iter": iter_num,
+            "delta": r.get("delta_from_previous_iter", "—"),
+            "trigger": trigger_src,
+            "decision": r.get("decision", "—"),
+            "best": str(metric_v)[:30],
+            "phases": n_phases,
+            "cycle": cycle_len or "—",
+            "drift": "⚠" if r.get("drift_warning") else "",
+            "framing": "✓" if r.get("framing_change") else "",
+            "reason": (r.get("reason") or "")[:80].replace("\n", " ").replace("|", "/"),
+        })
+
+    if not rows:
+        print("No iterations with reflect.json found yet.")
+        sys.exit(0)
+
+    lines = [
+        "# Research Timeline",
+        "",
+        f"_Generated from {len(rows)} iteration(s) — `tiny-lab timeline`_",
+        "",
+        "| iter | delta | trigger | decision | best | phases | cycle | flags | reason |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for r in rows:
+        flags = (r["drift"] + r["framing"]).strip() or " "
+        lines.append(
+            f"| {r['iter']} | {r['delta']} | {r['trigger']} | {r['decision']} | "
+            f"{r['best']} | {r['phases']} | {r['cycle']} | {flags} | {r['reason']} |"
+        )
+    text = "\n".join(lines) + "\n"
+
+    if out == "-":
+        print(text)
+        return
+
+    out_path = Path(out)
+    if not out_path.is_absolute():
+        out_path = project_dir / out_path
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(text)
+    print(f"Wrote: {out_path.relative_to(project_dir)}")
+    print(f"  {len(rows)} iteration(s) summarized")
 
 
 _REPO = "byungchanKo99/Tiny-Lab"

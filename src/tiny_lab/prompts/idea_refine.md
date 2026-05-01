@@ -65,3 +65,12 @@ Write to research/{iter}/.idea_refined.json with required fields:
   covered: what the user's idea already included
   added_from_domain: what domain research added
   user_decisions: decisions made (by user or by assumption in autonomous mode)
+- idea_provenance:
+  inspirations: list of {paper_id_or_url, key_idea_borrowed, how_adapted}
+  — every external source whose method/insight you are reusing,
+  with one phrase on what you borrowed and one on how it was adapted
+  here. Pulled from .domain_research.json references; any new source
+  must be a real paper (the ref-verify hook will check).
+  differentiation: one sentence — how this is NOT just `<closest prior
+  work>`. Without this, EVALUATE/STORY_TELL has nothing to anchor
+  novelty claims against.

@@ -184,6 +184,20 @@
     {
       "id": "PHASE_RECORD",
       "type": "process",
+      "next": "HYPOTHESIS_UPDATE"
+    },
+    {
+      "id": "HYPOTHESIS_UPDATE",
+      "type": "ai_session",
+      "prompt": "prompts/hypothesis_update.md",
+      "allowed_tools": ["Read", "Write", "Edit"],
+      "allowed_write_globs": ["research/{iter}/phases/.hypothesis_log.json"],
+      "context": ["iter", "current_phase", "previous_results_summary"],
+      "completion": {
+        "artifact": "research/{iter}/phases/.hypothesis_log.json",
+        "required_fields": ["iteration", "entries"]
+      },
+      "error": { "max_retries": 3, "on_exhaust": "skip" },
       "next": "CHECKPOINT"
     },
     {
