@@ -32,12 +32,17 @@ class TestInit:
     def test_init_idempotent_hooks(self, tmp_path):
         from tiny_lab.cli import _cmd_init
         _cmd_init(tmp_path, "ml-experiment")
+        first = json.loads((tmp_path / ".claude" / "settings.json").read_text())
         _cmd_init(tmp_path, "ml-experiment")  # second init
+        second = json.loads((tmp_path / ".claude" / "settings.json").read_text())
 
-        settings = json.loads((tmp_path / ".claude" / "settings.json").read_text())
-        # Should not duplicate hook entries
-        assert len(settings["hooks"]["PreToolUse"]) == 1
-        assert len(settings["hooks"]["PostToolUse"]) == 1
+        # Hooks count must not grow on re-init
+        assert len(second["hooks"]["PreToolUse"]) == len(first["hooks"]["PreToolUse"])
+        assert len(second["hooks"]["PostToolUse"]) == len(first["hooks"]["PostToolUse"])
+        # And the registered hooks should still include both expected commands
+        post_cmds = {e["command"] for e in second["hooks"]["PostToolUse"]}
+        assert any("state_advance" in c for c in post_cmds)
+        assert any("ref_verify" in c for c in post_cmds)
 
     def test_init_preserves_existing_settings(self, tmp_path):
         from tiny_lab.cli import _cmd_init

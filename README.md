@@ -106,13 +106,48 @@ AI가 만든 실험 계획을 다른 AI 세션이 검증. 선행연구 충분? B
 
 ## Presets
 
-| Preset          | Use Case                   |
-| --------------- | -------------------------- |
-| `ml-experiment` | ML 모델 개발 + 실험 (기본) |
-| `review-paper`  | 문헌 리뷰                  |
-| `novel-method`  | 새로운 방법론 논문         |
-| `data-analysis` | 데이터 탐색 + 분석         |
-| `custom`        | 커스텀 워크플로우          |
+| Preset          | Use Case                                                                                    |
+| --------------- | ------------------------------------------------------------------------------------------- |
+| `ideate`        | 주제·가설 탐색 (후보 발산 → novelty/feasibility 평가 → 1개 선정 → 다음 프리셋으로 핸드오프) |
+| `ideate-deep`   | 위 + 문헌 스캔 + 갭 분석 (신중한 주제 선정용)                                               |
+| `ml-experiment` | ML 모델 개발 + 실험 (기본)                                                                  |
+| `review-paper`  | 문헌 리뷰                                                                                   |
+| `novel-method`  | 새로운 방법론 논문                                                                          |
+| `data-analysis` | 데이터 탐색 + 분석                                                                          |
+| `custom`        | 커스텀 워크플로우                                                                           |
+
+**가설부터 잡고 싶을 때**: `tiny-lab init --preset ideate` → 후보 가설들을 평가하고 한 개를 선정한 뒤, 출력된 `research/.handoff.md`를 따라 본 연구 프리셋으로 이어가라. 주제→논문 한 번에 가는 것보다 연구 퀄리티가 올라간다.
+
+## 레퍼런스 검증
+
+외부 논문을 인용하는 단계(`DOMAIN_RESEARCH`, `DIVERGE` 등)는 자동으로 인용 검증 훅이 돌아 환각된 인용을 잡아낸다. 수동 재검증은 `tiny-lab verify-refs` (옵션: `--iter N`, `--strict`).
+
+## 실행 모드 (v7.8+)
+
+두 가지 양립 가능한 모드:
+
+```bash
+# CLI 엔진 모드 — 자동화/배치
+tiny-lab run                       # claude 기본
+tiny-lab run --engine codex        # codex 백엔드
+tiny-lab run --engine claude --model opus
+
+# 네이티브 모드 — Claude Code OR Codex CLI 채팅에서 인터랙티브
+#   Claude: .claude/skills/tiny-lab/SKILL.md 자동 로드
+#   Codex:  AGENTS.md 자동 로드 + .codex/hooks.json 등록
+# 메인 세션이 직접 state machine 진행 (subprocess 없음)
+# Hook은 듀얼모드 — Claude env vars / Codex stdin JSON 자동 감지
+```
+
+같은 `.state.json`을 공유 — 자유롭게 전환 가능. preset의 state별 `"engine": "codex"` 필드로 단계마다 다른 백엔드 사용도 가능.
+
+## 의무 시각화 (v7.6+)
+
+데이터 이해 단계와 가설 선정 단계는 시각화를 의무로 만든다 — 텍스트 JSON만으로는 놓치기 쉬운 패턴/트레이드오프를 PNG로 강제 노출.
+
+- `VISUALIZE_DATA` (ml-experiment, novel-method, data-analysis): 분포 grid, correlation heatmap, missing matrix, target relationship, time-series profile — 데이터 타입 부적합 시 자동 skip → `research/{iter}/data_viz/`
+- `VISUALIZE_CANDIDATES` (ideate, ideate-deep): score radar, Pareto scatter, weighted total bar + (deep만) gap landscape → `research/{iter}/ideate_viz/`
+- `PHASE_CODE/RUN`: phase별 최소 1개 PNG → `research/{iter}/results/`
 
 ## 파일 구조
 

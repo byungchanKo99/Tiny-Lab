@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tiny-lab"
-version = "7.3.3"
+version = "7.8.0"
 description = "Domain-agnostic adaptive loop"
 readme = "README.md"
 license = "MIT"
@@ -26,3 +26,4 @@ packages = ["src/tiny_lab"]
 "src/tiny_lab/prompts" = "tiny_lab/prompts"
 "src/tiny_lab/hooks" = "tiny_lab/hooks"
 "src/tiny_lab/templates" = "tiny_lab/templates"
+"src/tiny_lab/backends" = "tiny_lab/backends"

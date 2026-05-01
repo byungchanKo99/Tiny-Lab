@@ -3,12 +3,17 @@
 
 When AI writes the completion artifact for the current state,
 this hook validates required fields and transitions to the next state.
+
+Dual-mode: works under both Claude Code and Codex CLI.
 """
 import fnmatch
 import json
-import os
 import sys
 from pathlib import Path
+
+# Sibling import — same trick as state_gate.py
+sys.path.insert(0, str(Path(__file__).parent))
+from hook_io import read_hook_input  # noqa: E402
 
 WORKFLOW = Path("research/.workflow.json")
 STATE_FILE = Path("research/.state.json")
@@ -18,11 +23,11 @@ def main() -> int:
     if not STATE_FILE.exists() or not WORKFLOW.exists():
         return 0
 
-    tool_name = os.environ.get("CLAUDE_TOOL_NAME", "")
-    if tool_name not in ("Write", "Edit"):
+    hook = read_hook_input(event_name="PostToolUse")
+    if hook.tool_name not in ("Write", "Edit"):
         return 0
 
-    written_file = os.environ.get("CLAUDE_TOOL_INPUT_FILE_PATH", "")
+    written_file = hook.file_path
     if not written_file:
         return 0
 
@@ -34,6 +39,9 @@ def main() -> int:
 
     current_state = state_data.get("state", "INIT")
     iteration = state_data.get("current_iteration", 1)
+    # Silent on terminal states — same reasoning as state_gate.py
+    if current_state in ("INIT", "DONE"):
+        return 0
 
     # Find current state spec
     spec = next((s for s in wf_data.get("states", []) if s["id"] == current_state), None)

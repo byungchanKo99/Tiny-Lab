@@ -32,8 +32,13 @@ Workflow: Shape → Gather → [Execute → Reflect → Diversify]↺ → Synthe
                             description="Set up directory structure, hooks, and prompt templates.")
     init_p.add_argument("--preset", default="ml-experiment",
                         choices=["ml-experiment", "review-paper", "novel-method",
-                                 "data-analysis", "custom"],
-                        help="Workflow preset (default: ml-experiment)")
+                                 "data-analysis", "ideate", "ideate-deep", "custom"],
+                        help="Workflow preset (default: ml-experiment). Use 'ideate' (lite) or "
+                             "'ideate-deep' (with literature scan + gap analysis) for topic & "
+                             "hypothesis exploration before committing to a research preset.")
+    init_p.add_argument("--ideate-first", action="store_true",
+                        help="Prepend ideate states to the chosen research preset, so the loop "
+                             "first selects a hypothesis then runs the full preset workflow.")
 
     # run
     run_p = sub.add_parser("run", help="Start the research loop",
@@ -43,7 +48,11 @@ Workflow: Shape → Gather → [Execute → Reflect → Diversify]↺ → Synthe
                        help="Override max iterations (default: from preset)")
     run_p.add_argument("--model", default="sonnet",
                        choices=["sonnet", "haiku", "opus"],
-                       help="Claude model (default: sonnet)")
+                       help="Claude model (default: sonnet); ignored when --engine=codex")
+    run_p.add_argument("--engine", default="claude",
+                       choices=["claude", "codex"],
+                       help="Default AI backend (default: claude). Per-state 'engine' field "
+                            "in workflow JSON overrides this for individual states.")
 
     # status
     sub.add_parser("status", help="Show current state, iteration, phase")
@@ -87,6 +96,28 @@ Actions:
     intervene_p.add_argument("action", choices=["approve", "skip", "modify", "stop", "add-phase"])
     intervene_p.add_argument("args", nargs="*")
 
+    # novelty
+    nov_p = sub.add_parser("novelty", help="Estimate novelty of ideate candidates",
+                           description="Query Semantic Scholar with each candidate's hypothesis and "
+                                       "report how many recent (default 3-year window) papers match. "
+                                       "Fewer matches → higher novelty score (0-10).")
+    nov_p.add_argument("--iter", type=int, help="Iteration to read .diverge.json from (default: current)")
+    nov_p.add_argument("--years", type=int, default=3, help="Recency window in years (default: 3)")
+    nov_p.add_argument("--write", action="store_true",
+                       help="Write per-candidate novelty into research/{iter}/.novelty.json")
+
+    # verify-refs
+    vr_p = sub.add_parser("verify-refs", help="Verify references in research artifacts",
+                          description="Check that papers cited in domain_research, diverge, "
+                                      "and other artifacts actually exist (arXiv/Crossref/Semantic Scholar). "
+                                      "Writes .ref_verification.json sidecars next to each source file.")
+    vr_p.add_argument("--iter", type=int, help="Verify a single iteration only")
+    vr_p.add_argument("--file", help="Verify a single file by path (overrides --iter)")
+    vr_p.add_argument("--no-write", action="store_true",
+                      help="Print results only; do not write sidecar files")
+    vr_p.add_argument("--strict", action="store_true",
+                      help="Exit non-zero if any reference is not_found")
+
     # report
     report_p = sub.add_parser("report", help="Report a bug/issue to GitHub",
                               description="Collect context (state, logs, errors) and create a GitHub issue.")
@@ -99,9 +130,9 @@ Actions:
     project_dir = Path.cwd()
 
     if args.command == "init":
-        _cmd_init(project_dir, args.preset)
+        _cmd_init(project_dir, args.preset, getattr(args, "ideate_first", False))
     elif args.command == "run":
-        _cmd_run(project_dir, args.idea, args.max_iter, args.model)
+        _cmd_run(project_dir, args.idea, args.max_iter, args.model, args.engine)
     elif args.command == "status":
         _cmd_status(project_dir)
     elif args.command == "stop":
@@ -118,6 +149,10 @@ Actions:
         _cmd_intervene(project_dir, args.action, args.args)
     elif args.command == "report":
         _cmd_report(project_dir, args.title, args.body, args.label)
+    elif args.command == "verify-refs":
+        _cmd_verify_refs(project_dir, args.iter, args.file, args.no_write, args.strict)
+    elif args.command == "novelty":
+        _cmd_novelty(project_dir, args.iter, args.years, args.write)
     else:
         parser.print_help()
 
@@ -152,12 +187,120 @@ def _register_hooks(project_dir: Path) -> None:
     if not any(e.get("command") == advance_cmd for e in post):
         post.append({"matcher": "Write|Edit", "command": advance_cmd})
 
+    # PostToolUse: ref-verify checks citations in research artifacts
+    ref_verify_cmd = "python3 .claude/hooks/ref_verify.py"
+    if not any(e.get("command") == ref_verify_cmd for e in post):
+        post.append({"matcher": "Write|Edit", "command": ref_verify_cmd})
+
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings_path.write_text(json.dumps(settings, indent=2) + "\n")
 
 
-def _cmd_init(project_dir: Path, preset: str) -> None:
+def _merge_ideate_into_preset(ideate: dict, research: dict) -> dict:
+    """Combine ideate's prefix states with a research preset's body.
+
+    Result: SHAPE_LITE → DIVERGE → EVALUATE_MATRIX → SELECT → IDEATE_INLINE_HANDOFF
+    → research preset's first non-SHAPE state (typically DOMAIN_RESEARCH).
+    The research preset's SHAPE_FULL is dropped because the hypothesis
+    already supplies the constraints.
+    """
+    import copy
+    ideate_states = {s["id"]: s for s in ideate.get("states", [])}
+    research_states = list(research.get("states", []))
+
+    # SHAPE states to drop: only ai_session shapers (SHAPE_FULL, SHAPE_LITE).
+    # SHAPE_SEED is a process state for convergence routing — keep it.
+    drop_ids = {"SHAPE_FULL", "SHAPE_LITE"}
+
+    # Find the first state in the research preset that we'd land on after
+    # dropping SHAPE_FULL — this is what IDEATE_INLINE_HANDOFF jumps to.
+    research_first = None
+    for s in research_states:
+        if s.get("id") in drop_ids:
+            continue
+        research_first = s.get("id")
+        break
+    if research_first is None:
+        research_first = research_states[0]["id"] if research_states else "DONE"
+
+    # Build the prefix states (everything except HANDOFF — replace with inline)
+    prefix = []
+    for sid in ("SHAPE_LITE", "DIVERGE", "EVALUATE_MATRIX",
+                "VISUALIZE_CANDIDATES", "SELECT"):
+        spec = ideate_states.get(sid)
+        if not spec:
+            continue
+        spec = dict(spec)  # shallow copy; we'll mutate `next`
+        if sid == "SELECT":
+            spec["next"] = {
+                "selected": "IDEATE_INLINE_HANDOFF",
+                "redo": "DIVERGE",
+                "reshape": "SHAPE_LITE",
+            }
+        prefix.append(spec)
+
+    # Inline handoff: write constraints.json from hypothesis, then jump to research_first
+    prefix.append({
+        "id": "IDEATE_INLINE_HANDOFF",
+        "type": "ai_session",
+        "prompt": "prompts/ideate/handoff_inline.md",
+        "allowed_tools": ["Read", "Write"],
+        "allowed_write_globs": [
+            "research/constraints.json",
+            "research/.handoff_log.md",
+        ],
+        "completion": {
+            "artifact": "research/constraints.json",
+            "required_fields": ["objective", "ideated_from"],
+        },
+        "error": {"max_retries": 3, "on_exhaust": "stop"},
+        "next": research_first,
+    })
+
+    # Carry research states verbatim, except dropped shapers.
+    body = []
+    for s in research_states:
+        if s.get("id") in drop_ids:
+            continue
+        # Redirect any remaining references to dropped shapers (e.g.,
+        # REVIEW_DONE.REJECT → SHAPE_FULL) to the inline handoff so the
+        # workflow can recover without a dangling edge.
+        s = copy.deepcopy(s)  # avoid mutating the preset dict held by caller
+        nxt = s.get("next")
+        if isinstance(nxt, str) and nxt in drop_ids:
+            s["next"] = "IDEATE_INLINE_HANDOFF"
+        elif isinstance(nxt, dict):
+            s["next"] = {k: ("IDEATE_INLINE_HANDOFF" if v in drop_ids else v) for k, v in nxt.items()}
+        body.append(s)
+
+    # Keep the research preset's autonomy/exploration/intervention; merge boards
+    merged = dict(research)
+    merged["states"] = prefix + body
+
+    # Board: union of sections, prepend ideate progress
+    research_board = research.get("board", {})
+    ideate_board = ideate.get("board", {})
+    merged_board = dict(research_board)
+    merged_board["title"] = f"Ideate + {research_board.get('title', 'Research')}"
+    research_sections = research_board.get("sections", [])
+    ideate_sections = ideate_board.get("sections", [])
+    merged_board["sections"] = (
+        ["constraints", "ideate_progress"]
+        + [s for s in research_sections if s not in ("constraints", "ideate_progress")]
+        + [s for s in ideate_sections if s not in research_sections and s != "constraints"]
+    )
+    merged_board["custom_sections"] = {
+        **ideate_board.get("custom_sections", {}),
+        **research_board.get("custom_sections", {}),
+    }
+    merged["board"] = merged_board
+
+    return merged
+
+
+def _cmd_init(project_dir: Path, preset: str, ideate_first: bool = False) -> None:
     """Initialize research project with a workflow preset."""
+    import json
     from .paths import research_dir, workflow_path, shared_dir
 
     rd = research_dir(project_dir)
@@ -171,8 +314,21 @@ def _cmd_init(project_dir: Path, preset: str) -> None:
         sys.exit(1)
 
     wf_path = workflow_path(project_dir)
-    shutil.copy2(preset_file, wf_path)
-    print(f"Initialized with preset: {preset}")
+
+    if ideate_first:
+        if preset in ("ideate", "ideate-deep", "custom"):
+            print(f"--ideate-first ignored: preset is already {preset}")
+            shutil.copy2(preset_file, wf_path)
+        else:
+            ideate_file = Path(__file__).parent / "presets" / "ideate.json"
+            ideate_data = json.loads(ideate_file.read_text())
+            research_data = json.loads(preset_file.read_text())
+            merged = _merge_ideate_into_preset(ideate_data, research_data)
+            wf_path.write_text(json.dumps(merged, indent=2, ensure_ascii=False) + "\n")
+            print(f"Initialized with preset: ideate + {preset} (--ideate-first)")
+    else:
+        shutil.copy2(preset_file, wf_path)
+        print(f"Initialized with preset: {preset}")
 
     # Copy hooks
     hooks_src = Path(__file__).parent / "hooks"
@@ -207,6 +363,31 @@ def _cmd_init(project_dir: Path, preset: str) -> None:
     if claude_md_src.exists() and not claude_md_dst.exists():
         shutil.copy2(claude_md_src, claude_md_dst)
         print("CLAUDE.md installed")
+
+    # Copy the tiny-lab skill into .claude/skills/tiny-lab/
+    skill_src = Path(__file__).parent / "templates" / "skill" / "SKILL.md"
+    skill_dst_dir = project_dir / ".claude" / "skills" / "tiny-lab"
+    skill_dst = skill_dst_dir / "SKILL.md"
+    if skill_src.exists():
+        skill_dst_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(skill_src, skill_dst)
+        print(f"Skill installed: {skill_dst.relative_to(project_dir)}")
+
+    # Codex CLI counterparts: AGENTS.md (auto-loaded from cwd) and
+    # .codex/hooks.json (project-local hook registration).
+    agents_src = Path(__file__).parent / "templates" / "codex" / "AGENTS.md"
+    agents_dst = project_dir / "AGENTS.md"
+    if agents_src.exists() and not agents_dst.exists():
+        shutil.copy2(agents_src, agents_dst)
+        print("AGENTS.md installed (Codex native runner)")
+
+    codex_hooks_src = Path(__file__).parent / "templates" / "codex" / "hooks.json"
+    codex_hooks_dst = project_dir / ".codex" / "hooks.json"
+    if codex_hooks_src.exists() and not codex_hooks_dst.exists():
+        codex_hooks_dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(codex_hooks_src, codex_hooks_dst)
+        print(f"Codex hooks installed: {codex_hooks_dst.relative_to(project_dir)}")
+        print("  ⚠ Codex hooks require `[features] codex_hooks = true` in your codex config")
 
     # Copy .gitignore for research/
     gitignore_src = Path(__file__).parent / "templates" / "research.gitignore"
@@ -248,6 +429,7 @@ def _cmd_run(
     idea: str | None,
     max_iter: int | None = None,
     model: str = "sonnet",
+    engine_name: str = "claude",
 ) -> None:
     """Start the research loop."""
     from .engine import Engine
@@ -262,13 +444,13 @@ def _cmd_run(
         idea_file.write_text(idea)
         log(f"User idea: {idea}")
 
-    engine = Engine(project_dir, _load_registry(project_dir), model=model)
+    engine = Engine(project_dir, _load_registry(project_dir), model=model, engine=engine_name)
 
     if max_iter is not None:
         engine.workflow.autonomy.max_iterations = max_iter
         log(f"Max iterations overridden: {max_iter}")
 
-    log(f"Model: {model}")
+    log(f"Engine: {engine_name}  Model: {model}")
     engine.run()
 
 
@@ -535,6 +717,107 @@ def _cmd_board(project_dir: Path, iteration: int | None) -> None:
                 print(f"  ✗ {b.get('criterion', '?')}: {b.get('description', '')[:70]}")
         print()
 
+    # Ideate — candidate comparison table
+    eval_matrix_file = idir / ".evaluation_matrix.json" if idir.exists() else None
+    diverge_file = idir / ".diverge.json" if idir.exists() else None
+    if eval_matrix_file and eval_matrix_file.exists():
+        try:
+            em = json.loads(eval_matrix_file.read_text())
+            scored = em.get("scored_candidates", [])
+            ranking = em.get("ranking", [])
+            pareto = set(em.get("pareto_optimal_ids", []))
+            recommendation = em.get("recommendation", {})
+            top_id = recommendation.get("top_id")
+
+            # Optional: candidate labels from diverge.json
+            label_by_id = {}
+            if diverge_file and diverge_file.exists():
+                try:
+                    dv = json.loads(diverge_file.read_text())
+                    for c in dv.get("candidates", []):
+                        label_by_id[c.get("id", "")] = c.get("label", "")
+                except Exception:
+                    pass
+
+            print("Candidates:")
+            print(f"  {'id':<5s}{'label':<22s}{'nov':>5s}{'feas':>6s}{'falsi':>7s}"
+                  f"{'total':>7s}  flags")
+            print(f"  {'─'*5}{'─'*22}{'─'*5}{'─'*6}{'─'*7}{'─'*7}")
+            # Order by ranking if available, else by scored_candidates order
+            order = [r.get("id") for r in ranking] if ranking else [c.get("id") for c in scored]
+            score_by_id = {c.get("id"): c for c in scored}
+            for cid in order:
+                c = score_by_id.get(cid, {})
+                if not c:
+                    continue
+                nov = c.get("novelty", {}).get("score", "?")
+                feas = c.get("feasibility", {}).get("score", "?")
+                fals = c.get("falsifiability", {}).get("score", "?")
+                tot = c.get("weighted_total", "?")
+                label = (label_by_id.get(cid, "") or "")[:20]
+                flags = []
+                if cid in pareto:
+                    flags.append("⌬pareto")
+                if cid == top_id:
+                    flags.append("★top")
+                penalty = c.get("ref_verification_penalty", 0)
+                if penalty:
+                    flags.append(f"⚠refs(-{penalty})")
+                tot_s = f"{tot:.2f}" if isinstance(tot, (int, float)) else str(tot)
+                print(f"  {cid:<5s}{label:<22s}{str(nov):>5s}{str(feas):>6s}"
+                      f"{str(fals):>7s}{tot_s:>7s}  {' '.join(flags)}")
+            if recommendation:
+                runner = recommendation.get("runner_up_id")
+                print(f"  Recommendation: {top_id} (runner-up: {runner or '—'})")
+            print()
+        except Exception as e:
+            print(f"  (could not render candidates: {e})")
+            print()
+
+    # Visualization manifests (data + ideate)
+    for manifest_name, viz_dirname, label in (
+        (".data_viz_manifest.json", "data_viz", "Data Visualizations"),
+        (".candidate_viz_manifest.json", "ideate_viz", "Candidate Visualizations"),
+    ):
+        manifest_file = idir / manifest_name if idir.exists() else None
+        viz_dir = idir / viz_dirname if idir.exists() else None
+        png_count = len(list(viz_dir.glob("*.png"))) if viz_dir and viz_dir.exists() else 0
+        if not manifest_file or not manifest_file.exists():
+            continue
+        try:
+            mf = json.loads(manifest_file.read_text())
+            generated = mf.get("generated", [])
+            skipped = mf.get("skipped", [])
+            summary = mf.get("summary") or mf.get("viewer_summary", "")
+            print(f"{label}: {png_count} PNG ({len(generated)} generated, {len(skipped)} skipped)")
+            for g in generated:
+                fname = g.get("filename", "?")
+                what = g.get("what_it_shows") or g.get("key_takeaway", "")
+                print(f"  ✓ {fname}: {what[:70]}")
+            for s in skipped:
+                print(f"  ○ {s.get('id', '?')} skipped — {s.get('skip_reason', '')[:70]}")
+            if summary:
+                print(f"  Summary: {summary[:120]}")
+            print()
+        except Exception:
+            pass
+
+    # Selected hypothesis
+    hyp_file = idir / "hypothesis.json" if idir.exists() else None
+    if hyp_file and hyp_file.exists():
+        try:
+            h = json.loads(hyp_file.read_text())
+            verdict = h.get("verdict", "?")
+            print(f"Hypothesis [{verdict}]")
+            if verdict == "selected":
+                print(f"  H1: {h.get('hypothesis', '?')[:90]}")
+                print(f"  H0: {h.get('null_hypothesis', '?')[:90]}")
+                np = h.get("next_preset", "?")
+                print(f"  Next preset: {np}")
+            print()
+        except Exception:
+            pass
+
     # Results — auto-extract numeric metrics for comparison table
     rdir = results_dir(project_dir, target_iter)
     if rdir.exists() and list(rdir.glob("*.json")):
@@ -692,6 +975,119 @@ def _cmd_intervene(project_dir: Path, action: str, extra_args: list[str]) -> Non
     ipath.parent.mkdir(parents=True, exist_ok=True)
     ipath.write_text(json.dumps(intervention, indent=2))
     print(f"Intervention sent: {action}")
+
+
+def _cmd_verify_refs(
+    project_dir: Path,
+    iteration: int | None,
+    single_file: str | None,
+    no_write: bool,
+    strict: bool,
+) -> None:
+    """Verify references in research artifacts."""
+    from .refs import (
+        verify_file, verify_all, write_verification, format_summary,
+    )
+
+    write_files = not no_write
+
+    if single_file:
+        path = Path(single_file)
+        if not path.is_absolute():
+            path = project_dir / path
+        if not path.exists():
+            print(f"File not found: {path}")
+            sys.exit(2)
+        result = verify_file(path)
+        results = [result]
+        if write_files and result.total > 0:
+            out = write_verification(path, result)
+            print(f"Wrote: {out.relative_to(project_dir)}")
+    else:
+        results = verify_all(project_dir, iteration=iteration, write_files=write_files)
+        if write_files:
+            for r in results:
+                if r.total > 0:
+                    sidecar = (
+                        Path(r.source_file).parent
+                        / (Path(r.source_file).stem + ".ref_verification.json")
+                    )
+                    print(f"Wrote: {sidecar.relative_to(project_dir)}")
+
+    print()
+    print(format_summary(results))
+
+    if strict:
+        any_not_found = any(r.not_found > 0 for r in results)
+        if any_not_found:
+            print("\nstrict mode: at least one not_found reference — exiting 1")
+            sys.exit(1)
+
+
+def _cmd_novelty(
+    project_dir: Path,
+    iteration: int | None,
+    years: int,
+    write: bool,
+) -> None:
+    """Estimate novelty for each candidate in .diverge.json."""
+    import json
+    from .refs import novelty_estimate
+    from .state import load_state
+    from .paths import iter_dir
+
+    if iteration is None:
+        ls = load_state(project_dir)
+        iteration = ls.current_iteration
+
+    diverge_file = iter_dir(project_dir, iteration) / ".diverge.json"
+    if not diverge_file.exists():
+        print(f"No .diverge.json at {diverge_file}")
+        sys.exit(2)
+
+    try:
+        dv = json.loads(diverge_file.read_text())
+    except json.JSONDecodeError as e:
+        print(f"Cannot read {diverge_file}: {e}")
+        sys.exit(2)
+
+    candidates = dv.get("candidates", [])
+    if not candidates:
+        print("No candidates in .diverge.json")
+        sys.exit(2)
+
+    print(f"Querying Semantic Scholar for {len(candidates)} candidates "
+          f"(window: last {years} years)\n")
+    print(f"  {'id':<5s}{'label':<22s}{'matches':>9s}{'score':>7s}")
+    print(f"  {'─'*5}{'─'*22}{'─'*9}{'─'*7}")
+
+    results = []
+    for c in candidates:
+        cid = c.get("id", "?")
+        label = (c.get("label") or "")[:20]
+        hypothesis = c.get("hypothesis", "")
+        result = novelty_estimate(hypothesis, year_window=years)
+        results.append({
+            "id": cid,
+            "label": c.get("label"),
+            "hypothesis": hypothesis,
+            **result,
+        })
+        score = result.get("novelty_score")
+        score_s = str(score) if score is not None else "?"
+        count = result.get("count", 0)
+        err = result.get("error")
+        marker = f" ({err})" if err else ""
+        print(f"  {cid:<5s}{label:<22s}{count:>9d}{score_s:>7s}{marker}")
+
+    if write:
+        out_path = iter_dir(project_dir, iteration) / ".novelty.json"
+        out_path.write_text(json.dumps({
+            "iteration": iteration,
+            "year_window": years,
+            "candidates": results,
+        }, indent=2, ensure_ascii=False) + "\n")
+        print(f"\nWrote: {out_path.relative_to(project_dir)}")
 
 
 _REPO = "byungchanKo99/Tiny-Lab"
