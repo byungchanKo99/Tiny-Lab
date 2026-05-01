@@ -43,6 +43,7 @@ class EngineContext:
     project_dir: "Path"  # type: ignore[name-defined]  # noqa: F821
     workflow: "Workflow"  # type: ignore[name-defined]  # noqa: F821
     model: str = "sonnet"  # claude model: sonnet | haiku | opus
+    engine: str = "claude"  # default ai backend: claude | codex (per-state may override)
 
     @property
     def autonomy(self) -> Any:

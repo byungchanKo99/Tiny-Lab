@@ -1,4 +1,4 @@
-"""AI session handler — runs Claude Code with prompt and checks for artifacts."""
+"""AI session handler — runs the configured AI backend and checks for artifacts."""
 from __future__ import annotations
 
 import glob as g
@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from ..backends import get_backend
 from ..errors import StateError
 from ..logging import log
 from ..paths import results_dir, iter_dir, knowledge_dir, constraints_path
@@ -29,37 +30,34 @@ class AiSessionHandler:
     def _run_noninteractive(
         self, spec: StateSpec, ls: LoopState, ctx: EngineContext, prompt: str,
     ) -> StateResult:
-        """Run Claude in pipe mode (-p) — no user interaction."""
-        cmd = ["claude", "-p", prompt, "--output-format", "json", "--model", ctx.model]
-        if spec.allowed_tools:
-            cmd.extend(["--allowedTools", ",".join(spec.allowed_tools)])
+        """Run the configured AI backend — no user interaction."""
+        backend_name = spec.engine or ctx.engine
+        backend = get_backend(backend_name)
 
-        # Session resume: reuse within iteration
+        # Session continuity: only meaningful for backends that support resume.
+        # Codex is stateless today, so session_id is informational.
         if ls.session_id:
-            cmd.extend(["--resume", ls.session_id])
-            log(f"ENGINE: resuming session {ls.session_id[:8]}…")
+            log(f"ENGINE: resuming {backend.name} session {ls.session_id[:8]}…")
         else:
-            session_id = str(uuid.uuid4())
-            cmd.extend(["--session-id", session_id])
-            ls.session_id = session_id
-            save_state(ctx.project_dir, ls)
-            log(f"ENGINE: new session {session_id[:8]}…")
+            log(f"ENGINE: new {backend.name} session for {spec.id}")
 
-        log(f"ENGINE: running Claude session for {spec.id}")
-        result = subprocess.run(
-            cmd,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            cwd=str(ctx.project_dir),
-            timeout=1800,
+        log(f"ENGINE: running {backend.name} session for {spec.id}")
+        result = backend.invoke(
+            prompt,
+            cwd=ctx.project_dir,
+            model=ctx.model if backend.name == "claude" else None,
+            allowed_tools=spec.allowed_tools or None,
+            session_id=ls.session_id,
+            timeout=1800.0,
         )
 
-        # Extract session_id from JSON output (may change on resume)
-        _update_session_id(result.stdout, ctx)
+        # Persist resolved session id (some backends rotate it).
+        if result.session_id and result.session_id != ls.session_id:
+            ls.session_id = result.session_id
+            save_state(ctx.project_dir, ls)
 
-        log(f"ENGINE: Claude session finished (exit={result.returncode})")
-        if result.returncode != 0 and result.stderr:
+        log(f"ENGINE: {backend.name} session finished (exit={result.exit_code})")
+        if result.exit_code != 0 and result.stderr:
             for line in result.stderr.strip().splitlines()[-5:]:
                 log(f"ENGINE: stderr: {line}")
 

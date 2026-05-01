@@ -62,6 +62,7 @@ class StateSpec:
     error: ErrorSpec | None = None
     condition: ConditionSpec | None = None
     next: str | dict[str, str] | None = None  # str for single, dict for conditional
+    engine: str | None = None  # ai backend override: "claude" | "codex" | None (use ctx default)
 
 
 @dataclass
@@ -158,6 +159,7 @@ def _parse_state(raw: dict[str, Any]) -> StateSpec:
         error=_parse_error(raw.get("error")),
         condition=_parse_condition(raw.get("condition")),
         next=raw.get("next"),
+        engine=raw.get("engine"),
     )
 
 

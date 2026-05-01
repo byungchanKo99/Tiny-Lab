@@ -27,11 +27,22 @@ from .workflow import StateSpec, load_workflow
 class Engine:
     """Tiny-lab state machine engine."""
 
-    def __init__(self, project_dir: Path, registry: HandlerRegistry, model: str = "sonnet") -> None:
+    def __init__(
+        self,
+        project_dir: Path,
+        registry: HandlerRegistry,
+        model: str = "sonnet",
+        engine: str = "claude",
+    ) -> None:
         self.project_dir = project_dir
         self.workflow = load_workflow(workflow_path(project_dir))
         self.registry = registry
-        self.ctx = EngineContext(project_dir=project_dir, workflow=self.workflow, model=model)
+        self.ctx = EngineContext(
+            project_dir=project_dir,
+            workflow=self.workflow,
+            model=model,
+            engine=engine,
+        )
         self._shutdown = False
 
     def run(self) -> None:
