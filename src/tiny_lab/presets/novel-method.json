@@ -109,6 +109,22 @@
         "required_fields": ["files", "features"]
       },
       "error": { "max_retries": 10, "on_exhaust": "skip" },
+      "next": "VISUALIZE_DATA"
+    },
+    {
+      "id": "VISUALIZE_DATA",
+      "type": "ai_session",
+      "prompt": "prompts/visualize_data.md",
+      "allowed_tools": ["Read", "Bash", "Write"],
+      "allowed_write_globs": [
+        "research/{iter}/data_viz/*",
+        "research/{iter}/.data_viz_manifest.json"
+      ],
+      "completion": {
+        "artifact": "research/{iter}/.data_viz_manifest.json",
+        "required_fields": ["generated", "summary"]
+      },
+      "error": { "max_retries": 5, "on_exhaust": "skip" },
       "next": "IDEA_REFINE"
     },
     {

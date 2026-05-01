@@ -91,6 +91,22 @@
         "required_fields": ["scored_candidates", "ranking"]
       },
       "error": { "max_retries": 3, "on_exhaust": "stop" },
+      "next": "VISUALIZE_CANDIDATES"
+    },
+    {
+      "id": "VISUALIZE_CANDIDATES",
+      "type": "ai_session",
+      "prompt": "prompts/ideate/visualize_candidates.md",
+      "allowed_tools": ["Read", "Bash", "Write"],
+      "allowed_write_globs": [
+        "research/{iter}/ideate_viz/*",
+        "research/{iter}/.candidate_viz_manifest.json"
+      ],
+      "completion": {
+        "artifact": "research/{iter}/.candidate_viz_manifest.json",
+        "required_fields": ["generated", "viewer_summary"]
+      },
+      "error": { "max_retries": 5, "on_exhaust": "skip" },
       "next": "SELECT"
     },
     {
