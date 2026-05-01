@@ -10,6 +10,10 @@ research/.research-lock
 research/.current_cycle_prompt.md
 research/trigger.log
 research/cards/
+research/loop.log
+research/_extract/
+research/dbi-meeting-*.md
+.serena/
 probes/results/
 examples/mlx/runs/
 examples/mlx/.local_run/

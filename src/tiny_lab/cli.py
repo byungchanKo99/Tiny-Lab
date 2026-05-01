@@ -921,11 +921,42 @@ def _cmd_board(project_dir: Path, iteration: int | None) -> None:
             for item in items:
                 print(item)
 
-    # Reflect
+    # Reflect (current iter)
     reflect_file = idir / "reflect.json" if idir.exists() else None
     if reflect_file and reflect_file.exists():
         reflect = json.loads(reflect_file.read_text())
-        print(f"Reflect: {reflect.get('decision', '?')} — {reflect.get('reason', '')[:100]}")
+        delta = reflect.get("delta_from_previous_iter")
+        drift = reflect.get("drift_warning")
+        delta_str = f"  delta={delta}" if delta else ""
+        drift_str = "  ⚠drift" if drift else ""
+        print(f"Reflect: {reflect.get('decision', '?')}{delta_str}{drift_str} — "
+              f"{reflect.get('reason', '')[:90]}")
+
+    # Framing log — scan every iter's reflect.json for framing_change entries
+    if "framing_log" in board_sections:
+        from .paths import research_dir as _research_dir
+        framing_entries = []
+        rd = _research_dir(project_dir)
+        if rd.exists():
+            for d in sorted(rd.glob("iter_*")):
+                rfile = d / "reflect.json"
+                if not rfile.exists():
+                    continue
+                try:
+                    r = json.loads(rfile.read_text())
+                except (json.JSONDecodeError, OSError):
+                    continue
+                fc = r.get("framing_change")
+                if fc and isinstance(fc, dict):
+                    framing_entries.append((d.name, fc))
+        if framing_entries:
+            print("\nFraming Log:")
+            for iter_name, fc in framing_entries:
+                axis = fc.get("axis", "?")
+                from_f = (fc.get("from_frame") or "")[:60]
+                to_f = (fc.get("to_frame") or "")[:60]
+                print(f"  {iter_name} [{axis}]: {from_f}")
+                print(f"            → {to_f}")
 
     # Iterations history
     ipath = iterations_path(project_dir)

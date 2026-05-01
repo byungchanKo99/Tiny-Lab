@@ -12,6 +12,11 @@ Read these files:
 - research/constraints.json — boundaries that must be respected
 - shared/knowledge/ — accumulated knowledge from prior research
 - research/{iter}/reflect.json — the latest reflection
+- shared/knowledge/abandoned.json (if exists) — hypotheses explicitly killed in
+  past iterations. Your new seed MUST NOT match any abandoned entry by core idea
+  or keyword overlap (>= 50% of content words). If your best candidate overlaps
+  with an abandoned entry, generate a different one and explain in `rationale`
+  why it is genuinely distinct.
 
 ## Step 1: Map the explored space
 

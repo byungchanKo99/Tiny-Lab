@@ -80,6 +80,38 @@ Read the metric/goal from the research plan:
 - If qualitative goal: are the success criteria met?
 - What's the best result so far across all phases?
 
+## Step 5.5: Classify the delta from the previous iteration
+
+Read `research/.iterations.json` and the previous iter's
+`research/iter_<N-1>/reflect.json` (skip if this is iter 1). Look at the
+_concrete artifacts_ that changed (which result files appeared, which
+research_plan.json phases changed, what new mentions appeared in the
+paper draft) and classify the delta into ONE of:
+
+- **continued** — same direction, same phase set, results similar in
+  kind to last iter
+- **deepened** — same direction, but added new analyses, sub-experiments,
+  or refined the methodology in the same frame
+- **pivoted** — same problem but different methodology family or framing
+  (e.g., "metaphor → control-theoretic formulation")
+- **new_track** — added a parallel research thread (new phase set
+  unrelated to the previous one)
+- **paused** — no real progress on the main thread; if 1-line status is
+  identical to last iter, this is the honest label
+- **completed** — the original goal was reached this iter
+
+You must produce ONE concrete piece of evidence (file path or specific
+phase id) that justifies the label — vague claims like "we made progress"
+are not allowed. Also identify WHAT triggered this delta:
+
+- **internal** — your own analysis of last iter's results
+- **external** — a paper, dataset, reviewer note, or other outside input
+- **timeline_pressure** — a deadline or external schedule
+- **random** — exploration not tied to a specific signal
+
+Carry these into Step 8's `delta_from_previous_iter`, `delta_evidence`,
+and `delta_trigger` fields.
+
 ## Step 6: Think deeply about next steps
 
 Don't just classify — reason step by step:
@@ -97,6 +129,58 @@ Don't just classify — reason step by step:
 - If idea_mutation: the paper's limitations become the motivation for the new idea
 
 If you run out of ideas, think harder. Re-read the paper draft. The answer is often in the limitations.
+
+## Step 6.5: External trigger for any direction change
+
+If your tentative decision is `idea_mutation` or `domain_pivot` (or the
+delta classification was `pivoted` / `new_track`), identify the trigger
+explicitly:
+
+- **trigger_source**: paper | reviewer_feedback | external_event |
+  pure_internal_analysis | timeline_pressure
+- **trigger_artifact**: file path, URL, or 1-line external event
+  description
+- **trigger_date**: ISO date when the trigger arrived (use today if it's
+  a fresh internal analysis)
+
+Why this matters: pivots that look like "internal analysis" often were
+actually triggered by an outside paper or a deadline a few days earlier.
+Forcing this attribution helps EXPLORE later understand what kind of
+external stimulus tends to unlock progress in this project.
+
+Carry into Step 8's `pivot_trigger` field.
+
+## Step 6.6: Framing change (optional)
+
+A _framing change_ is when the **justification frame** for the same
+problem shifts — e.g., "metaphor → control-theoretic formulation",
+"empirical patch → principled mechanism", "single-task → multi-task
+view". This is different from `pivoted` (which is a change in
+methodology); framing is the change in _how you justify what you're
+doing_.
+
+If a framing change happened this iter, fill `framing_change` with:
+
+- `from_frame` — 1 sentence describing the old justification
+- `to_frame` — 1 sentence describing the new justification
+- `axis` — justification | mechanism | scope | metric
+- `evidence_artifact` — file path that documents the new frame
+
+Otherwise omit the field.
+
+## Step 6.7: Static drift check (drift_warning)
+
+Read the previous 3 iterations' `reflect.json` (skip if fewer exist).
+Compare their `delta_evidence` strings to the one you just wrote in
+Step 5.5. If your new evidence is essentially the same as all 3 prior
+ones (paraphrase aside) — i.e., you have been writing the same "what
+changed" line for 4 iterations in a row — then set `drift_warning: true`.
+
+When `drift_warning` is true, your decision in Step 7 MUST be one of
+`idea_mutation` or `domain_pivot` — `add_phases` (continued/deepened
+work) is blocked. The intuition: 4 iterations of the same delta is the
+most reliable signal of hidden stagnation, even when individual results
+look fine.
 
 ## Step 7: Decide
 
@@ -125,17 +209,53 @@ Choose ONE of these decisions:
 
 Write to research/{iter}/reflect.json with required fields:
 
-- decision: one of done, add_phases, idea_mutation, domain_pivot
-- reason: 2-3 sentences explaining why, citing specific experiment results
-- best_result: best experiment details (phase_id, metric_value, config)
-- diagnosis: root cause analysis for gaps (from Step 2)
-- missing_experiments: list of experiments that should be added (from Step 3)
-- contributions: draft contribution bullets (from Step 4)
-- future_iteration_seeds: list of 1-3 promising follow-up research directions, each with a one-line description. ALWAYS include this, even if decision is "done".
-- new_idea: (required if decision is idea_mutation) pick the most promising seed and expand it into a concrete research idea
-- carry_over: (only if new iteration) which artifacts to keep
+- **decision**: one of done, add_phases, idea_mutation, domain_pivot
+- **reason**: 2-3 sentences explaining why, citing specific experiment results
+- **best_result**: best experiment details (phase_id, metric_value, config)
+- **diagnosis**: root cause analysis for gaps (from Step 2)
+- **missing_experiments**: list of experiments that should be added (from Step 3)
+- **contributions**: draft contribution bullets (from Step 4)
+- **delta_from_previous_iter** (from Step 5.5): one of [continued, deepened, pivoted, new_track, paused, completed]. For iter 1, use "new_track".
+- **delta_evidence** (from Step 5.5): one sentence — what concretely changed since the previous iter, citing a file path or phase id
+- **delta_trigger** (from Step 5.5): one of [internal, external, timeline_pressure, random]
+- **drift_warning** (from Step 6.7): true | false. If true, decision MUST be idea_mutation or domain_pivot
+- **pivot_trigger** (from Step 6.5, only if decision is idea_mutation/domain_pivot OR delta is pivoted/new_track):
+  - `trigger_source`: paper | reviewer_feedback | external_event | pure_internal_analysis | timeline_pressure
+  - `trigger_artifact`: file path / URL / event description
+  - `trigger_date`: ISO date
+- **framing_change** (from Step 6.6, only if a framing change happened):
+  - `from_frame`, `to_frame`, `axis`, `evidence_artifact`
+- **future_iteration_seeds**: list of `{direction, status, reason}` where status is one of:
+  - `promote_next` — strong enough to drive the next iteration
+  - `defer` — interesting but not now; revisit after current direction matures
+  - `discard` — explored mentally and rejected; record why so it does not come back
+    ALWAYS include this list, even if decision is "done".
+- **abandoned_hypotheses** (optional but encouraged): list of `{hypothesis, reason}` for ideas
+  killed in this iter — they will be appended to `shared/knowledge/abandoned.json` and
+  consulted by EXPLORE to prevent revisiting the same dead ends.
+- **new_idea**: (required if decision is idea_mutation) pick the most promising
+  `promote_next` seed and expand it into a concrete research idea
+- **carry_over**: (only if new iteration) which artifacts to keep
 
-**Critical**: If future_iteration_seeds is non-empty, your decision should almost certainly be idea_mutation, not done. "I have ideas but I'm stopping" is a contradiction.
+**Critical**: If any future_iteration_seed has status `promote_next`, your decision
+should almost certainly be idea_mutation, not done. "I have a promotable idea but I'm
+stopping" is a contradiction.
+
+## Step 8.5: Append to abandoned set (if any)
+
+If you wrote `abandoned_hypotheses`, also append each entry to
+`shared/knowledge/abandoned.json` (create the file if missing). Schema:
+
+```json
+{
+  "entries": [
+    {"iteration": N, "hypothesis": "...", "reason": "...", "killed_at": "<ISO date>"}
+  ]
+}
+```
+
+EXPLORE will read this file and avoid generating seeds that match
+abandoned hypotheses by keyword overlap.
 
 ## Step 9: Update convergence log
 
