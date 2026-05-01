@@ -1,0 +1,135 @@
+{
+  "autonomy": {
+    "mode": "autonomous",
+    "max_iterations": 3,
+    "allow_idea_mutation": true,
+    "stop_on_target": false,
+    "circuit_breaker": {
+      "max_consecutive_failures": 8
+    }
+  },
+  "exploration": {
+    "convergence_window": 2,
+    "similarity_threshold": 0.7,
+    "force_explore_after": 3
+  },
+  "intervention": {
+    "checkpoint": "between_phases",
+    "timeout_seconds": 1800
+  },
+  "board": {
+    "title": "Ideate (Topic & Hypothesis)",
+    "metric_keys": ["novelty", "feasibility", "falsifiability", "total_score"],
+    "flag_keys": ["selected"],
+    "sections": [
+      "constraints",
+      "ideate_progress",
+      "candidates",
+      "selection",
+      "events"
+    ],
+    "custom_sections": {
+      "ideate_progress": {
+        "files": [
+          ".shaped_input.json",
+          ".diverge.json",
+          ".evaluation_matrix.json",
+          "hypothesis.json"
+        ],
+        "labels": [
+          "Shaped Input",
+          "Candidates",
+          "Evaluation",
+          "Selected Hypothesis"
+        ]
+      }
+    }
+  },
+  "states": [
+    {
+      "id": "SHAPE_LITE",
+      "type": "ai_session",
+      "prompt": "prompts/ideate/shape_lite.md",
+      "allowed_tools": ["Read", "Write", "WebSearch"],
+      "interactive": true,
+      "interactive_fallback": "self_answer",
+      "allowed_write_globs": [
+        "research/.shaped_input.json",
+        "research/constraints.json"
+      ],
+      "completion": {
+        "artifact": "research/constraints.json",
+        "required_fields": ["objective", "domain", "background"]
+      },
+      "error": { "max_retries": 5, "on_exhaust": "stop" },
+      "next": "DIVERGE"
+    },
+    {
+      "id": "DIVERGE",
+      "type": "ai_session",
+      "prompt": "prompts/ideate/diverge.md",
+      "allowed_tools": ["Read", "Write", "WebSearch", "WebFetch"],
+      "allowed_write_globs": [
+        "research/{iter}/.diverge.json",
+        "shared/knowledge/*"
+      ],
+      "completion": {
+        "artifact": "research/{iter}/.diverge.json",
+        "required_fields": ["candidates", "diverge_strategy"]
+      },
+      "error": { "max_retries": 5, "on_exhaust": "stop" },
+      "next": "EVALUATE_MATRIX"
+    },
+    {
+      "id": "EVALUATE_MATRIX",
+      "type": "ai_session",
+      "prompt": "prompts/ideate/evaluate_matrix.md",
+      "allowed_tools": ["Read", "Write", "WebSearch"],
+      "allowed_write_globs": ["research/{iter}/.evaluation_matrix.json"],
+      "completion": {
+        "artifact": "research/{iter}/.evaluation_matrix.json",
+        "required_fields": ["scored_candidates", "ranking"]
+      },
+      "error": { "max_retries": 3, "on_exhaust": "stop" },
+      "next": "SELECT"
+    },
+    {
+      "id": "SELECT",
+      "type": "ai_session",
+      "prompt": "prompts/ideate/select.md",
+      "allowed_tools": ["Read", "Write"],
+      "interactive": true,
+      "interactive_fallback": "self_answer",
+      "allowed_write_globs": [
+        "research/{iter}/hypothesis.json",
+        "research/hypothesis.json"
+      ],
+      "completion": {
+        "artifact": "research/{iter}/hypothesis.json",
+        "required_fields": ["verdict"]
+      },
+      "error": { "max_retries": 3, "on_exhaust": "stop" },
+      "condition": {
+        "source": "{iter}/hypothesis.json",
+        "field": "verdict"
+      },
+      "next": {
+        "selected": "HANDOFF",
+        "redo": "DIVERGE",
+        "reshape": "SHAPE_LITE"
+      }
+    },
+    {
+      "id": "HANDOFF",
+      "type": "ai_session",
+      "prompt": "prompts/ideate/handoff.md",
+      "allowed_tools": ["Read", "Write"],
+      "allowed_write_globs": ["research/.handoff.md"],
+      "completion": {
+        "artifact": "research/.handoff.md"
+      },
+      "error": { "max_retries": 3, "on_exhaust": "skip" },
+      "next": "DONE"
+    }
+  ]
+}
