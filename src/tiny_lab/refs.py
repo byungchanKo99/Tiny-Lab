@@ -451,6 +451,96 @@ def verify_all(
     return results
 
 
+def novelty_estimate(
+    hypothesis: str,
+    year_window: int = 3,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Estimate hypothesis novelty by counting recent similar papers.
+
+    Uses Semantic Scholar's paper search. The score is a coarse proxy:
+    fewer recent matches → higher novelty.
+
+    Returns:
+        {
+          "query": "...",
+          "matches": [{"title": "...", "year": 2024, "url": "..."}, ...],
+          "count": N,
+          "novelty_score": 0-10,  # 10 = no matches (high novelty), 0 = many
+          "method": "semantic_scholar",
+          "error": null | "string",
+        }
+    """
+    import datetime
+
+    out: dict[str, Any] = {
+        "query": hypothesis,
+        "matches": [],
+        "count": 0,
+        "novelty_score": None,
+        "method": "semantic_scholar",
+        "error": None,
+    }
+    if not hypothesis or len(hypothesis.strip()) < 10:
+        out["error"] = "hypothesis too short for search"
+        return out
+
+    cutoff_year = datetime.datetime.now().year - year_window
+    q = urllib.parse.quote(hypothesis.strip())
+    url = (
+        f"https://api.semanticscholar.org/graph/v1/paper/search"
+        f"?query={q}&limit={limit}&fields=title,year,externalIds,url"
+    )
+    code, body = _http_get(url, accept="application/json")
+    if code in (0, 429):
+        out["error"] = f"API unavailable (http {code})"
+        return out
+    if code != 200:
+        out["error"] = f"http {code}"
+        return out
+
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError as e:
+        out["error"] = f"invalid response: {e}"
+        return out
+
+    papers = data.get("data", [])
+    recent = []
+    for p in papers:
+        year = p.get("year")
+        if year is None or year < cutoff_year:
+            continue
+        ext = p.get("externalIds", {}) or {}
+        arxiv = ext.get("ArXiv")
+        recent.append({
+            "title": p.get("title"),
+            "year": year,
+            "url": p.get("url") or (
+                f"https://arxiv.org/abs/{arxiv}" if arxiv else None
+            ),
+        })
+    out["matches"] = recent[:10]  # cap displayed list
+    out["count"] = len(recent)
+
+    # Score: 0 matches → 10, 1-2 → 8, 3-5 → 6, 6-10 → 4, 11-20 → 2, >20 → 1
+    n = len(recent)
+    if n == 0:
+        score = 10
+    elif n <= 2:
+        score = 8
+    elif n <= 5:
+        score = 6
+    elif n <= 10:
+        score = 4
+    elif n <= 20:
+        score = 2
+    else:
+        score = 1
+    out["novelty_score"] = score
+    return out
+
+
 def format_summary(results: Iterable[VerificationResult]) -> str:
     """Compact human-readable summary."""
     lines: list[str] = []
