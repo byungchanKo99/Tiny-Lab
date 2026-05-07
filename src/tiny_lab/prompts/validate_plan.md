@@ -14,6 +14,12 @@ Read these files:
 
 ## Validation Criteria
 
+## Engine-Enforced Plan Quality Contract
+
+Use the shared plan quality contract below for all structural, baseline, DAG, schema, and evidence requirements that the engine will also enforce:
+
+{plan_quality_contract}
+
 ### A. Constraint alignment (MUST pass)
 
 For each phase in the plan:
@@ -51,19 +57,20 @@ If insufficient → REJECT with recommendation to return to CONTEXT_GATHER.
 
 ### E. Baseline coverage
 
-1. Is there a non-ML baseline phase? (physical model, heuristic, statistical)
-2. Is there a simple ML baseline phase? (linear model, decision tree)
-3. Are baselines evaluated with the SAME metric as the main experiments?
+1. Does the plan satisfy the baseline requirements from the shared plan quality contract?
+2. Are baseline phases evaluated with the SAME metric as the main experiments?
+3. Does the `baselines` list itself include explicit entries rather than relying only on checklist claims?
 
 Score: complete / partial / missing
 If missing → REJECT.
 
 ### F. Experimental rigor
 
-1. Does the plan include ablation or feature importance analysis?
-2. Do expected_outputs schemas require statistics (std, CI), not just mean?
-3. Is there cross-validation or multiple evaluation splits?
-4. Is there error analysis (where does the model fail)?
+1. Does the plan satisfy every experimental rigor requirement from the shared plan quality contract?
+2. Are statistics, reproducibility metadata, code provenance, baseline comparison, ablation/feature-importance/sensitivity, evaluation protocol, error analysis, and leakage evidence materialized in result schemas where applicable?
+3. Is there an explicit leakage audit for train/test, target, temporal, group, duplicate, and preprocessing leakage where applicable?
+
+{evidence_contract}
 
 Score: rigorous / adequate / weak
 If weak → REJECT.
@@ -110,6 +117,8 @@ Write research/{iter}/.plan_validation.json:
 - D insufficient → REJECT (need more research first)
 - E missing → REJECT (no baselines = no valid comparison)
 - F weak → REJECT (results won't be trustworthy)
+- Missing reproducibility metadata, baseline comparison evidence, or leakage audit in an ML experiment → REJECT
+- Leakage audit mentioned only in prose but absent from result schemas → REJECT
 - All checks pass or have only warnings → APPROVE
 
 ## Important

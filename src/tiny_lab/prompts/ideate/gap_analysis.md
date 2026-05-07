@@ -13,8 +13,8 @@ Read these files:
 
 - research/{iter}/.lit_scan.json — sub-problems, methods, key papers
 - research/{iter}/.lit_scan.ref_verification.json (if exists) — which
-  papers were verified as real; treat unverified/not_found citations as
-  weak evidence
+  papers were verified as real; treat unverified/not_found/error citations
+  as weak evidence
 - research/constraints.json — domain bounds, invariants
 
 ## Step 1: Distinguish gap types
@@ -122,6 +122,6 @@ Write research/{iter}/.gap_analysis.json:
   An incremental contribution to a saturated area scores low even if the
   area is significant.
 - **Acknowledge weak evidence**: if your gap relies on papers that
-  ref_verify marked unverified/not_found, flag it. Better to demote a
-  shaky gap than build candidates on hallucinated context.
+  ref_verify marked unverified/not_found/error, flag it. Better to demote
+  a shaky gap than build candidates on hallucinated context.
 - **Top 3-5 only**: more dilutes DIVERGE's focus.

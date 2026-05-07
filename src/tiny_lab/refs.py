@@ -13,9 +13,12 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
+
+from .paths import is_safe_research_artifact_path, iteration_dirs
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -25,6 +28,34 @@ VERIFIED = "verified"
 UNVERIFIED = "unverified"
 NOT_FOUND = "not_found"
 ERROR = "error"
+
+REFERENCE_VERIFICATION_CONTRACT_MARKDOWN = f"""## Reference Verification Contract
+
+This section is generated from `tiny_lab.refs`. Update that module, not individual prompt copies.
+
+Reference-bearing iteration artifacts write sidecars next to the source artifact as
+`<source-stem>.ref_verification.json`, for example:
+
+- `research/iter_1/.domain_research.json` -> `research/iter_1/.domain_research.ref_verification.json`
+- `research/iter_1/.lit_scan.json` -> `research/iter_1/.lit_scan.ref_verification.json`
+- `research/iter_1/.diverge.json` -> `research/iter_1/.diverge.ref_verification.json`
+
+Status semantics:
+
+- `{VERIFIED}`: identity was verified through arXiv, Crossref, or Semantic Scholar; URL HEAD checks only prove the URL is reachable.
+- `{UNVERIFIED}`: the verifier lacked enough identifiers or evidence to confirm the work.
+- `{NOT_FOUND}`: the verifier searched but could not find the work.
+- `{ERROR}`: the verifier hit an API, network, or parsing error.
+
+Strict completion means every reference is `{VERIFIED}` and the sidecar audit has no structural issues.
+`tiny-lab verify-refs --strict` exits non-zero for any `{NOT_FOUND}`, `{UNVERIFIED}`, or `{ERROR}` reference.
+
+For candidate scoring and literature-gap reasoning, treat `{UNVERIFIED}`, `{NOT_FOUND}`, and `{ERROR}` as weak evidence. Apply `ref_verification_penalty` to candidate ideas whose `grounded_in` citations are not fully verified, and do not build novelty, SOTA, or superiority claims on them."""
+
+
+def render_reference_verification_contract() -> str:
+    """Return the shared reference verification contract for prompts and runners."""
+    return REFERENCE_VERIFICATION_CONTRACT_MARKDOWN.strip()
 
 
 @dataclass
@@ -80,6 +111,10 @@ _REF_FIELD_CANDIDATES = (
     "papers",
     "grounded_in",
     "citations",
+    "bibliography",
+    "works_cited",
+    "related_work",
+    "sources",
     "evidence",
 )
 
@@ -407,33 +442,61 @@ def write_verification(source_file: Path, result: VerificationResult) -> Path:
         out_name = source_file.stem + ".ref_verification.json"
 
     out_path = source_file.parent / out_name
-    out_path.write_text(json.dumps(result.to_json(), indent=2, ensure_ascii=False) + "\n")
+    payload = result.to_json()
+    payload["source_file"] = _sidecar_source_file(source_file)
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
     return out_path
+
+
+def _sidecar_source_file(source_file: Path) -> str:
+    parts = source_file.as_posix().split("/")
+    for index in range(len(parts) - 1, -1, -1):
+        if parts[index] == "research":
+            return "/".join(parts[index:])
+    return source_file.as_posix()
 
 
 # ---------------------------------------------------------------------------
 # Discovery — find all reference-bearing artifacts in a project
 # ---------------------------------------------------------------------------
 
-# Globs for files that typically contain references.
-_DISCOVERY_GLOBS = (
-    "research/iter_*/.domain_research.json",
-    "research/iter_*/.diverge.json",
-    "research/iter_*/.papers_collected.json",
-    "research/iter_*/.paper_analysis.json",
-    "research/iter_*/.related_work.json",
-    "research/iter_*/.evaluation_matrix.json",
-)
-
-
 def discover_artifacts(project_dir: Path, iteration: int | None = None) -> list[Path]:
-    """Return all reference-bearing artifacts, optionally filtered to one iteration."""
+    """Return JSON artifacts that actually contain references."""
     found: list[Path] = []
-    for pattern in _DISCOVERY_GLOBS:
-        if iteration is not None:
-            pattern = pattern.replace("iter_*", f"iter_{iteration}")
-        found.extend(project_dir.glob(pattern))
+    roots = _iteration_dirs(project_dir, iteration)
+    for root in roots:
+        for artifact in sorted({*root.glob("*.json"), *root.glob(".*.json")}):
+            if not is_reference_artifact_candidate_path(artifact):
+                continue
+            count = _artifact_reference_count(artifact)
+            if count:
+                found.append(artifact)
     return sorted(found)
+
+
+def is_reference_artifact_candidate_path(path: str | Path) -> bool:
+    """Return whether a path may be a reference-bearing iteration JSON artifact."""
+    candidate = Path(path)
+    text = candidate.as_posix()
+    if text.endswith(".ref_verification.json"):
+        return False
+    if not candidate.is_absolute() and not is_safe_research_artifact_path(candidate):
+        return False
+    parts = candidate.parts
+    return any(
+        part == "research"
+        and index + 2 == len(parts) - 1
+        and re.fullmatch(r"iter_\d+", parts[index + 1]) is not None
+        and parts[index + 2].endswith(".json")
+        for index, part in enumerate(parts[:-2])
+    )
+
+
+def _iteration_dirs(project_dir: Path, iteration: int | None) -> list[Path]:
+    if iteration is not None:
+        root = project_dir / "research" / f"iter_{iteration}"
+        return [root] if root.exists() else []
+    return iteration_dirs(project_dir)
 
 
 def verify_all(
@@ -449,6 +512,258 @@ def verify_all(
             write_verification(artifact, result)
         results.append(result)
     return results
+
+
+def audit_reference_sidecars(
+    project_dir: Path,
+    iteration: int | None = None,
+    *,
+    require_identity_verified: bool = False,
+) -> list[str]:
+    """Check existing reference verification sidecars without network calls."""
+    issues: list[str] = []
+    audited_sidecars: set[Path] = set()
+    for artifact in discover_artifacts(project_dir, iteration=iteration):
+        sidecar = artifact.parent / (artifact.stem + ".ref_verification.json")
+        audited_sidecars.add(sidecar)
+        if not sidecar.exists():
+            actual_total = _artifact_reference_count(artifact)
+            if actual_total:
+                issues.append(f"{artifact.relative_to(project_dir)} missing ref verification sidecar")
+            continue
+        try:
+            data = json.loads(sidecar.read_text())
+            summary = data.get("summary", {})
+        except Exception as e:
+            issues.append(f"{sidecar.relative_to(project_dir)} invalid JSON: {e}")
+            continue
+        rel_artifact = artifact.relative_to(project_dir).as_posix()
+        source_file = data.get("source_file")
+        if source_file != rel_artifact:
+            issues.append(
+                f"{sidecar.relative_to(project_dir)} source_file {source_file!r} "
+                f"does not match {rel_artifact!r}"
+            )
+        count_issue, counts = _sidecar_summary_counts(summary)
+        if count_issue:
+            issues.append(f"{sidecar.relative_to(project_dir)} {count_issue}")
+            continue
+        total = counts["total"]
+        actual_total = _artifact_reference_count(artifact)
+        if actual_total is not None and total != actual_total:
+            issues.append(
+                f"{sidecar.relative_to(project_dir)} total {total} does not match "
+                f"{rel_artifact} references {actual_total}"
+            )
+        verified = counts["verified"]
+        unverified = counts["unverified"]
+        not_found = counts["not_found"]
+        error = counts["error"]
+        accounted = verified + unverified + not_found + error
+        if accounted == total:
+            refs_issue, ref_status_counts = _sidecar_ref_status_counts(data.get("refs"), total)
+            if refs_issue:
+                issues.append(f"{sidecar.relative_to(project_dir)} {refs_issue}")
+            elif ref_status_counts:
+                expected_counts = {
+                    VERIFIED: verified,
+                    UNVERIFIED: unverified,
+                    NOT_FOUND: not_found,
+                    ERROR: error,
+                }
+                if ref_status_counts != expected_counts:
+                    issues.append(
+                        f"{sidecar.relative_to(project_dir)} refs status counts "
+                        f"{ref_status_counts} do not match summary counts {expected_counts}"
+                    )
+                else:
+                    verified_evidence_issue = _sidecar_verified_ref_evidence_issue(
+                        data.get("refs"),
+                        require_identity_verified=require_identity_verified,
+                    )
+                    if verified_evidence_issue:
+                        issues.append(f"{sidecar.relative_to(project_dir)} {verified_evidence_issue}")
+                if actual_total is not None and total == actual_total:
+                    signature_issue = _sidecar_ref_signature_issue(data.get("refs"), artifact)
+                    if signature_issue:
+                        issues.append(f"{sidecar.relative_to(project_dir)} {signature_issue}")
+        unaccounted = max(0, total - accounted)
+        unverified_total = unverified + unaccounted
+        if unverified_total:
+            issues.append(f"{sidecar.relative_to(project_dir)} has {unverified_total} unverified references")
+        if not_found:
+            issues.append(f"{sidecar.relative_to(project_dir)} has {not_found} not_found references")
+        if error:
+            issues.append(f"{sidecar.relative_to(project_dir)} has {error} verification errors")
+    for sidecar in _existing_reference_sidecars(project_dir, iteration):
+        if sidecar in audited_sidecars:
+            continue
+        stale_issue = _stale_sidecar_issue(project_dir, sidecar)
+        if stale_issue:
+            issues.append(f"{sidecar.relative_to(project_dir)} {stale_issue}")
+    return issues
+
+
+def _existing_reference_sidecars(project_dir: Path, iteration: int | None) -> list[Path]:
+    sidecars: set[Path] = set()
+    for root in _iteration_dirs(project_dir, iteration):
+        sidecars.update(root.glob("*.ref_verification.json"))
+        sidecars.update(root.glob(".*.ref_verification.json"))
+    return sorted(sidecars)
+
+
+def _stale_sidecar_issue(project_dir: Path, sidecar: Path) -> str | None:
+    try:
+        data = json.loads(sidecar.read_text())
+    except Exception as e:
+        return f"invalid JSON: {e}"
+    source_file = data.get("source_file")
+    if not isinstance(source_file, str) or not source_file.strip():
+        return "source_file is required"
+    if (
+        not is_safe_research_artifact_path(source_file)
+        or not is_reference_artifact_candidate_path(source_file)
+    ):
+        return f"source_file {source_file!r} is not a reference artifact path"
+    source_path = project_dir / source_file
+    if not source_path.is_file():
+        return f"source_file {source_file!r} is missing"
+    expected_sidecar = source_path.parent / (source_path.stem + ".ref_verification.json")
+    if sidecar != expected_sidecar:
+        expected_rel = expected_sidecar.relative_to(project_dir)
+        return f"sidecar path does not match source_file; expected {expected_rel}"
+    actual_total = _artifact_reference_count(source_path)
+    if actual_total is None:
+        return f"source_file {source_file!r} cannot be read as JSON"
+    if actual_total == 0:
+        return f"source_file {source_file!r} no longer contains references"
+    return None
+
+
+def _artifact_reference_count(artifact: Path) -> int | None:
+    refs = _artifact_references(artifact)
+    if refs is None:
+        return None
+    return len(refs)
+
+
+def _artifact_references(artifact: Path) -> list[dict[str, Any]] | None:
+    try:
+        data = json.loads(artifact.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    return extract_references(data)
+
+
+def _sidecar_ref_signature_issue(refs: Any, artifact: Path) -> str | None:
+    if not isinstance(refs, list):
+        return None
+    expected_refs = _artifact_references(artifact)
+    if expected_refs is None:
+        return None
+    expected = Counter(_reference_signature(ref) for ref in expected_refs)
+    observed: Counter[tuple[str, str, str, str]] = Counter()
+    for i, ref in enumerate(refs):
+        if not isinstance(ref, dict):
+            return None
+        raw = ref.get("raw")
+        if not isinstance(raw, dict):
+            return f"refs[{i}].raw must be an object matching the source reference"
+        observed[_reference_signature(raw)] += 1
+    if observed != expected:
+        return "refs raw references do not match source artifact references"
+    return None
+
+
+def _reference_signature(ref: dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        str(ref.get("title") or "").strip().lower(),
+        str(ref.get("url") or "").strip().lower(),
+        str(ref.get("doi") or "").strip().lower(),
+        str(ref.get("arxiv_id") or "").strip().lower(),
+    )
+
+
+def _sidecar_ref_status_counts(refs: Any, total: int) -> tuple[str | None, dict[str, int]]:
+    if refs is None:
+        if total == 0:
+            return None, {}
+        return f"refs must list {total} verification records", {}
+    if not isinstance(refs, list):
+        return "refs must be a list", {}
+    if len(refs) != total:
+        return f"refs length {len(refs)} does not match summary.total {total}", {}
+
+    counts = {VERIFIED: 0, UNVERIFIED: 0, NOT_FOUND: 0, ERROR: 0}
+    valid = set(counts)
+    for i, ref in enumerate(refs):
+        if not isinstance(ref, dict):
+            return f"refs[{i}] must be an object", {}
+        status = ref.get("status")
+        if status not in valid:
+            return (
+                f"refs[{i}].status must be one of "
+                f"{', '.join(sorted(valid))}"
+            ), {}
+        counts[status] += 1
+    return None, counts
+
+
+_VERIFICATION_METHODS = frozenset({"arxiv", "crossref", "semantic_scholar", "url_head"})
+
+
+def _sidecar_verified_ref_evidence_issue(
+    refs: Any,
+    *,
+    require_identity_verified: bool = False,
+) -> str | None:
+    if not isinstance(refs, list):
+        return None
+    for i, ref in enumerate(refs):
+        if not isinstance(ref, dict) or ref.get("status") != VERIFIED:
+            continue
+        method = ref.get("method")
+        if method not in _VERIFICATION_METHODS:
+            return f"refs[{i}] verified reference must include a valid verification method"
+        if method == "arxiv" and not _non_empty_ref_field(ref, "arxiv_id"):
+            return f"refs[{i}] arxiv verification must include arxiv_id"
+        if method == "crossref" and not _non_empty_ref_field(ref, "doi"):
+            return f"refs[{i}] crossref verification must include doi"
+        if method == "semantic_scholar" and not _non_empty_ref_field(ref, "canonical_title"):
+            return f"refs[{i}] semantic_scholar verification must include canonical_title"
+        if method == "url_head" and not _non_empty_ref_field(ref, "url"):
+            return f"refs[{i}] url_head verification must include url"
+        if method == "url_head" and require_identity_verified:
+            return (
+                f"refs[{i}] url_head verification only proves URL reachability; "
+                "identity verification required"
+            )
+    return None
+
+
+def _non_empty_ref_field(ref: dict[str, Any], key: str) -> bool:
+    value = ref.get(key)
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _sidecar_summary_counts(summary: Any) -> tuple[str | None, dict[str, int]]:
+    if not isinstance(summary, dict):
+        return "summary must be an object", {}
+    counts: dict[str, int] = {}
+    for key in ("total", "verified", "unverified", "not_found", "error"):
+        value = summary.get(key, 0) or 0
+        if isinstance(value, bool):
+            return f"summary.{key} must be an integer count", {}
+        if isinstance(value, int):
+            count = value
+        elif isinstance(value, str) and value.strip().isdigit():
+            count = int(value.strip())
+        else:
+            return f"summary.{key} must be an integer count", {}
+        if count < 0:
+            return f"summary.{key} must be a non-negative integer count", {}
+        counts[key] = count
+    return None, counts
 
 
 def novelty_estimate(

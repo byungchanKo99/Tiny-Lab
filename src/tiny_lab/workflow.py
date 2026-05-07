@@ -53,6 +53,7 @@ class StateSpec:
     prompt: str | None = None  # prompt template path
     allowed_tools: list[str] = field(default_factory=list)
     allowed_write_globs: list[str] = field(default_factory=list)
+    blocked_write_globs: list[str] = field(default_factory=list)
     blocked_bash_patterns: list[str] = field(default_factory=list)
     context: list[str] = field(default_factory=list)
     interactive: bool = False
@@ -63,6 +64,7 @@ class StateSpec:
     condition: ConditionSpec | None = None
     next: str | dict[str, str] | None = None  # str for single, dict for conditional
     engine: str | None = None  # ai backend override: "claude" | "codex" | None (use ctx default)
+    timeout_seconds: int | None = None  # backend invocation timeout for this state
 
 
 @dataclass
@@ -150,6 +152,7 @@ def _parse_state(raw: dict[str, Any]) -> StateSpec:
         prompt=raw.get("prompt"),
         allowed_tools=raw.get("allowed_tools", []),
         allowed_write_globs=raw.get("allowed_write_globs", []),
+        blocked_write_globs=raw.get("blocked_write_globs", []),
         blocked_bash_patterns=raw.get("blocked_bash_patterns", []),
         context=raw.get("context", []),
         interactive=raw.get("interactive", False),
@@ -160,6 +163,7 @@ def _parse_state(raw: dict[str, Any]) -> StateSpec:
         condition=_parse_condition(raw.get("condition")),
         next=raw.get("next"),
         engine=raw.get("engine"),
+        timeout_seconds=raw.get("timeout_seconds"),
     )
 
 
@@ -190,11 +194,21 @@ def load_workflow(path: Path) -> Workflow:
     if not path.exists():
         raise WorkflowError(f"Workflow file not found: {path}")
 
-    data = json.loads(path.read_text())
-    if not data or "states" not in data:
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError as e:
+        raise WorkflowError(f"Invalid workflow JSON: {e}") from e
+    if not isinstance(data, dict):
+        raise WorkflowError("Workflow JSON must be an object")
+    if "states" not in data:
         raise WorkflowError("Workflow must have 'states' list")
+    raw_states = data["states"]
+    if not isinstance(raw_states, list) or not raw_states:
+        raise WorkflowError("Workflow must have non-empty 'states' list")
+    if not all(isinstance(state, dict) for state in raw_states):
+        raise WorkflowError("Workflow 'states' entries must be objects")
 
-    states = [_parse_state(s) for s in data["states"]]
+    states = [_parse_state(s) for s in raw_states]
     autonomy = _parse_autonomy(data.get("autonomy"))
     intervention = _parse_intervention(data.get("intervention"))
 
@@ -221,6 +235,13 @@ def validate_workflow(wf: Workflow) -> None:
         # Type check
         if state.type not in ("ai_session", "process", "checkpoint"):
             errors.append(f"State {state.id}: invalid type '{state.type}'")
+
+        if state.timeout_seconds is not None and (
+            not isinstance(state.timeout_seconds, int)
+            or isinstance(state.timeout_seconds, bool)
+            or state.timeout_seconds < 1
+        ):
+            errors.append(f"State {state.id}: timeout_seconds must be a positive integer")
 
         # ai_session with dict next must have condition (for conditional routing)
         # process/checkpoint with dict next must have condition

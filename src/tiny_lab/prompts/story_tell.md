@@ -17,6 +17,14 @@ Read ALL of these:
 
 ## Paper structure
 
+Use the shared final-paper contract below for all engine-enforced structure, related-work, result-artifact citation, and claim-traceability requirements:
+
+{final_paper_contract}
+
+Use this evidence ledger as the concrete citation inventory for this final paper:
+
+{final_paper_evidence_ledger}
+
 Write research/final_paper.md with the following structure:
 
 ```markdown
@@ -105,10 +113,17 @@ This should stand alone — a reader should understand the contribution without 
 3. **Specificity over vagueness** — Use exact numbers, not "significant improvement." Use exact method names, not "advanced techniques."
 4. **Iteration as strength** — The fact that multiple approaches were tried is a feature, not a bug. It shows thorough exploration.
 5. **Constraints as framing** — Use the invariants from constraints.json to explain why certain approaches were/weren't viable.
+6. **Traceability over breadth** — Prefer a concise, audit-passing paper over a long paper with many unsupported claims. Delete or rewrite any sentence whose numbers, comparisons, uncertainty language, leakage language, or superiority language cannot cite a concrete result JSON in the same sentence.
 
 ## Important
 
 - This is NOT another iteration-level paper_draft. It covers the ENTIRE research journey.
-- Reference specific files (results/phase_X.json, iter_N/paper_draft.md) for the reader's reference.
+- Follow the shared final-paper contract exactly. Reference specific files (research/iter_N/results/phase_X.json, iter_N/paper_draft.md) for the reader's reference.
+- Before writing a sentence with any metric, sample size, split count, baseline comparison, statistical term, p-value, CI, std, SOTA/novelty term, or model-superiority wording, put the concrete `research/iter_N/results/*.json` path in that same sentence.
+- Do not use a title or heading that states or implies a result claim unless the heading itself includes the artifact path. Prefer neutral question/framing titles when the answer is empirical.
+- A concise paper is acceptable. Do not preserve broad background prose if it creates uncited metric, uncertainty, leakage, robustness, or superiority claims.
+- Copy exact numeric values from JSON artifacts where practical; if rounding, keep enough precision that the audit can match the cited JSON value.
+- Do not claim novelty, SOTA, state-of-the-art, or prior-work superiority unless the relevant `*.ref_verification.json` sidecars contain identity-verified references, not URL-reachability-only checks.
+- After drafting, mentally run `tiny-lab audit --strict` for the relevant iteration: fix any sentence that would fail artifact citation, numeric support, figure citation, or reference verification.
 - If the research involved an Explorer (BFS) pivot, highlight it — that's a key part of the story.
 - The paper should be self-contained: a reader who hasn't seen the raw data should understand the full arc.

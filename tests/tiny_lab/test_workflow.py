@@ -40,6 +40,16 @@ class TestLoadWorkflow:
         with pytest.raises(WorkflowError, match="states"):
             load_workflow(path)
 
+    def test_states_must_be_non_empty_list(self, tmp_workflow):
+        path = tmp_workflow({"states": {"id": "A", "type": "process"}})
+        with pytest.raises(WorkflowError, match="non-empty 'states' list"):
+            load_workflow(path)
+
+    def test_state_entries_must_be_objects(self, tmp_workflow):
+        path = tmp_workflow({"states": ["A"]})
+        with pytest.raises(WorkflowError, match="entries must be objects"):
+            load_workflow(path)
+
     def test_full_preset(self):
         """ml-experiment preset loads without error."""
         path = Path(__file__).parent.parent.parent / "src" / "tiny_lab" / "presets" / "ml-experiment.json"
@@ -102,6 +112,19 @@ class TestLoadWorkflow:
         assert err.retry_to == "B"
         assert err.on_exhaust == "stop"
 
+    def test_blocked_write_globs_parsing(self, tmp_workflow):
+        path = tmp_workflow({
+            "states": [{
+                "id": "A",
+                "type": "process",
+                "blocked_write_globs": ["research/{iter}/phases/*"],
+                "next": "DONE",
+            }],
+        })
+        wf = load_workflow(path)
+
+        assert wf.get_state("A").blocked_write_globs == ["research/{iter}/phases/*"]
+
     def test_condition_parsing(self, tmp_workflow):
         path = tmp_workflow({
             "states": [{
@@ -115,6 +138,19 @@ class TestLoadWorkflow:
         assert cond is not None
         assert cond.source == "reflect.json"
         assert cond.field == "decision"
+
+    def test_state_timeout_parsing(self, tmp_workflow):
+        path = tmp_workflow({
+            "states": [{
+                "id": "A",
+                "type": "ai_session",
+                "timeout_seconds": 12,
+                "next": "DONE",
+            }],
+        })
+        wf = load_workflow(path)
+
+        assert wf.get_state("A").timeout_seconds == 12
 
 
 class TestValidateWorkflow:
@@ -133,6 +169,13 @@ class TestValidateWorkflow:
             "states": [{"id": "A", "type": "invalid", "next": "DONE"}],
         })
         with pytest.raises(WorkflowError, match="invalid type"):
+            load_workflow(path)
+
+    def test_invalid_state_timeout(self, tmp_workflow):
+        path = tmp_workflow({
+            "states": [{"id": "A", "type": "ai_session", "timeout_seconds": 0, "next": "DONE"}],
+        })
+        with pytest.raises(WorkflowError, match="timeout_seconds must be a positive integer"):
             load_workflow(path)
 
     def test_ai_session_dict_next_requires_condition(self, tmp_workflow):

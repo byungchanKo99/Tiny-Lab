@@ -44,6 +44,7 @@ class EngineContext:
     workflow: "Workflow"  # type: ignore[name-defined]  # noqa: F821
     model: str = "sonnet"  # claude model: sonnet | haiku | opus
     engine: str = "claude"  # default ai backend: claude | codex (per-state may override)
+    backend_timeout_seconds: float | None = None  # CLI override for ai_session backend calls
 
     @property
     def autonomy(self) -> Any:

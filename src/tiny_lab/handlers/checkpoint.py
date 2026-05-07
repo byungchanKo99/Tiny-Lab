@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import time
 
+from ..advancement import resolve_next_state_from_value
 from ..errors import StateError
 from ..logging import log
 from ..paths import intervention_path
@@ -71,9 +72,12 @@ def _process_intervention(
 
 
 def _advance(spec: StateSpec, action: str, ls: LoopState, ctx: EngineContext) -> StateResult:
-    if isinstance(spec.next, dict):
-        target = spec.next.get(action, spec.next.get("approve", "DONE"))
-        return StateResult(transition=target)
-    elif isinstance(spec.next, str):
-        return StateResult(transition=spec.next)
-    return StateResult(transition="DONE")
+    target, problem = resolve_next_state_from_value(
+        spec,
+        action,
+        fallback_values=("approve",),
+        default_state="DONE",
+    )
+    if problem:
+        raise StateError(problem)
+    return StateResult(transition=target or "DONE")

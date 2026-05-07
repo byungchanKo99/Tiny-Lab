@@ -130,6 +130,34 @@ Don't just classify — reason step by step:
 
 If you run out of ideas, think harder. Re-read the paper draft. The answer is often in the limitations.
 
+## Step 6.4: Generate, score, and select follow-up directions
+
+If your decision may be `add_phases`, `idea_mutation`, or `domain_pivot`,
+create an explicit `idea_portfolio` before deciding. Generate at least 3
+candidate directions:
+
+1. a conservative deepening direction grounded in the strongest artifact,
+2. a diagnostic/error-analysis or ablation direction that could explain a
+   surprising result or failure mode,
+3. a more creative pivot, cross-dataset, cross-domain, or reframing
+   direction that could change the research trajectory.
+
+For each candidate, write:
+
+- `direction`: one concrete next research direction
+- `rationale`: why this follows from the evidence
+- `evidence`: concrete artifact path or phase id
+- `scores`: numeric 1-5 values for `novelty`, `feasibility`,
+  `expected_information_gain`, `risk`, and `artifact_cost`
+- `score`: your overall selection score
+- `status`: `promote_next`, `defer`, or `discard`
+
+Then choose exactly one `selected_direction`. Selection must not be random:
+explain why the selected candidate has the best balance of information gain,
+feasibility, novelty, risk, and artifact cost. The selected direction must
+match one `idea_portfolio` candidate and one `promote_next`
+`future_iteration_seeds` entry.
+
 ## Step 6.5: External trigger for any direction change
 
 If your tentative decision is `idea_mutation` or `domain_pivot` (or the
@@ -225,6 +253,17 @@ Write to research/{iter}/reflect.json with required fields:
   - `trigger_date`: ISO date
 - **framing_change** (from Step 6.6, only if a framing change happened):
   - `from_frame`, `to_frame`, `axis`, `evidence_artifact`
+- **idea_portfolio** (required unless decision is `done`): at least 3 candidate
+  direction objects from Step 6.4, each with `direction`, `rationale`,
+  `evidence`, `scores`, `score`, and `status`
+- **selected_direction** (required unless decision is `done`):
+  - `direction`: exactly one candidate direction from `idea_portfolio`
+  - `reason`: why this was selected over the other candidates
+  - `evidence`: concrete artifact path or phase id
+  - `selection_rule`: the decision rule used
+  - `score`: selected candidate score
+- **selection_rationale** (required unless decision is `done`): one sentence
+  explaining the tradeoff behind the selected direction
 - **future_iteration_seeds**: list of `{direction, status, reason}` where status is one of:
   - `promote_next` — strong enough to drive the next iteration
   - `defer` — interesting but not now; revisit after current direction matures

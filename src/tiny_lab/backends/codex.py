@@ -2,12 +2,15 @@
 
 Default invocation:
 
-    codex exec "<prompt>" --json --cd <cwd> [--model <model>] [--sandbox <sb>]
+    codex exec --json --skip-git-repo-check --cd <cwd> [--model <model>] [--sandbox <sb>]
+
+The prompt is sent on stdin so local process listings do not expose the
+rendered research prompt.
 
 The exact codex CLI surface evolves; if your installed `codex` uses a
 different command shape, override the entire base command via the
 TINYLAB_CODEX_CMD environment variable. It accepts a shell-quoted string
-and the prompt is appended as the last argument.
+for the base command; Tiny-Lab still sends the prompt on stdin.
 
 Example:
     export TINYLAB_CODEX_CMD="codex exec --json --skip-git-repo-check"
@@ -16,11 +19,13 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import shlex
 import subprocess
 from pathlib import Path
 
 from .base import BackendResult
+from ..processes import clear_active_backend, write_active_backend
 
 
 # Sandbox mapping: tiny-lab states declare allowed_write_globs which
@@ -33,13 +38,14 @@ def _base_cmd() -> list[str]:
     override = os.environ.get("TINYLAB_CODEX_CMD")
     if override:
         return shlex.split(override)
-    return ["codex", "exec", "--json"]
+    return ["codex", "exec", "--json", "--skip-git-repo-check"]
 
 
 class CodexBackend:
     """Calls the `codex` CLI. Stateless (no session resume)."""
 
     name = "codex"
+    supports_resume = False
 
     def invoke(
         self,
@@ -71,29 +77,81 @@ class CodexBackend:
         # Working directory
         cmd.extend(["--cd", str(cwd)])
 
-        # Prompt is the trailing positional
-        cmd.append(prompt)
-
-        proc = subprocess.run(
-            cmd,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            cwd=str(cwd),
-            timeout=timeout,
-        )
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=str(cwd),
+                start_new_session=(os.name != "nt"),
+            )
+            write_active_backend(cwd, backend=self.name, pid=proc.pid, command=cmd)
+            stdout, stderr = proc.communicate(input=prompt, timeout=timeout)
+            returncode = proc.returncode
+        except FileNotFoundError:
+            return BackendResult(
+                exit_code=127,
+                stdout="",
+                stderr=f"Backend command not found: {cmd[0]}",
+                session_id=None,
+            )
+        except subprocess.TimeoutExpired:
+            stdout, stderr = _collect_after_timeout(proc)
+            return BackendResult(
+                exit_code=124,
+                stdout=stdout or "",
+                stderr=((stderr + "\n") if stderr else "") + f"Backend command timed out after {timeout:g}s: {cmd[0]}",
+                session_id=None,
+            )
+        finally:
+            if "proc" in locals():
+                clear_active_backend(cwd, pid=proc.pid)
 
         # Codex --json writes streaming events; the last event typically
         # carries the final response. We surface stdout as-is for the engine
         # to parse if it needs to. Session id (if any) lives in event metadata.
-        out_session = _extract_session_id(proc.stdout)
+        out_session = _extract_session_id(stdout)
 
         return BackendResult(
-            exit_code=proc.returncode,
-            stdout=proc.stdout,
-            stderr=proc.stderr,
+            exit_code=returncode,
+            stdout=stdout,
+            stderr=stderr,
             session_id=out_session,
         )
+
+
+def _collect_after_timeout(proc: subprocess.Popen[str]) -> tuple[str, str]:
+    """Terminate Codex and its child vendor process group after hard timeout."""
+    _signal_backend_process_group(proc, signal.SIGTERM)
+    try:
+        return proc.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        _signal_backend_process_group(proc, signal.SIGKILL)
+        try:
+            return proc.communicate(timeout=5)
+        except Exception:
+            return "", ""
+    except Exception:
+        return "", ""
+
+
+def _signal_backend_process_group(proc: subprocess.Popen[str], sig: signal.Signals) -> None:
+    if os.name != "nt":
+        try:
+            os.killpg(proc.pid, sig)
+            return
+        except ProcessLookupError:
+            return
+        except PermissionError:
+            pass
+    try:
+        proc.kill()
+    except ProcessLookupError:
+        pass
+    except Exception:
+        pass
 
 
 def _extract_session_id(stdout: str) -> str | None:

@@ -6,12 +6,13 @@ built-in checks (has_pending_phases, etc.).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, Mapping
 
 import json
 
 from .errors import StateError
 from .paths import convergence_log_path
+from .runtime_placeholders import resolve_runtime_placeholders
 from .workflow import ConditionSpec
 
 
@@ -20,27 +21,67 @@ def resolve_condition(
     next_map: dict[str, str],
     project_dir: Path,
     iteration: int,
+    *,
+    current_phase_id: str | None = None,
 ) -> str:
     """Evaluate a condition and return the next state id."""
     if condition.check:
         value = _run_builtin_check(condition.check, project_dir, iteration)
     elif condition.source and condition.field:
-        value = _read_field(condition.source, condition.field, project_dir, iteration)
+        value = _read_field(
+            condition.source,
+            condition.field,
+            project_dir,
+            iteration,
+            current_phase_id=current_phase_id,
+        )
     else:
         raise StateError("Condition must have 'check' or 'source'+'field'")
 
-    value_str = str(value).lower() if isinstance(value, bool) else str(value)
-    if value_str in next_map:
-        return next_map[value_str]
+    return select_next_target(next_map, value)
+
+
+def select_next_target(
+    next_map: Mapping[str, str],
+    value: Any,
+    *,
+    fallback_values: Iterable[Any] = (),
+    default_state: str | None = None,
+) -> str:
+    """Select a next-state target from a workflow `next` map."""
+    attempted: list[str] = []
+    for candidate in (value, *tuple(fallback_values)):
+        value_str = _condition_value_key(candidate)
+        attempted.append(value_str)
+        if value_str in next_map:
+            return next_map[value_str]
     if "default" in next_map:
         return next_map["default"]
-    raise StateError(f"No matching next for condition value '{value_str}'. "
+    if default_state is not None:
+        return default_state
+    value_label = attempted[0] if attempted else ""
+    raise StateError(f"No matching next for condition value '{value_label}'. "
                      f"Available: {list(next_map.keys())}")
 
 
-def _read_field(source: str, field_name: str, project_dir: Path, iteration: int) -> Any:
+def _condition_value_key(value: Any) -> str:
+    return str(value).lower() if isinstance(value, bool) else str(value)
+
+
+def _read_field(
+    source: str,
+    field_name: str,
+    project_dir: Path,
+    iteration: int,
+    *,
+    current_phase_id: str | None = None,
+) -> Any:
     """Read a field from a JSON file."""
-    resolved = source.replace("{iter}", f"iter_{iteration}")
+    resolved = resolve_runtime_placeholders(
+        source,
+        iteration=iteration,
+        current_phase_id=current_phase_id,
+    )
     path = project_dir / "research" / resolved
     if not path.exists():
         raise StateError(f"Condition source not found: {path}")

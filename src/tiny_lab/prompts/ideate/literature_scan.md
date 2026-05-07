@@ -52,8 +52,8 @@ For each paper:
 
 **Hallucination guardrail**: Do not list a paper unless WebSearch returned
 it. The PostToolUse `ref_verify` hook will check every URL/arXiv ID after
-this step writes — `not_found` references are visible to downstream steps
-and will lower confidence in your output.
+this step writes — `unverified`, `not_found`, and `error` references are
+visible to downstream steps and will lower confidence in your output.
 
 Save the most useful 2-4 papers to `shared/knowledge/<slug>.md` as 1-2
 paragraph notes (verbatim title, URL, what claim/finding to remember).

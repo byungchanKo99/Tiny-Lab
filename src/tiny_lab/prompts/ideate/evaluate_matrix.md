@@ -10,9 +10,11 @@ Project directory: {project_dir}
 
 Read research/{iter}/.diverge.json — the candidates to score.
 
-Read research/{iter}/.ref_verification.json IF IT EXISTS — output of the
-reference-verification hook. Penalize candidates whose `grounded_in` URLs
-were marked `not_found`.
+Read the reference-verification sidecars for artifacts the candidates depend on,
+especially research/{iter}/.diverge.ref_verification.json and, in ideate-deep,
+research/{iter}/.lit_scan.ref_verification.json when they exist.
+
+{reference_verification_contract}
 
 ## Scoring rubric
 
@@ -77,8 +79,9 @@ For every candidate from .diverge.json, produce:
 ```
 
 `weighted_total` = `0.4 * novelty + 0.3 * feasibility + 0.3 * falsifiability`,
-minus `ref_verification_penalty` (subtract 1.0 for each not_found URL in
-the candidate's `grounded_in`).
+minus `ref_verification_penalty` (subtract 1.0 for each `grounded_in`
+citation that is `unverified`, `not_found`, or `error` in the relevant
+sidecar).
 
 ## Step 2: Identify Pareto-optimal set
 

@@ -24,6 +24,11 @@ import sys
 from dataclasses import dataclass
 from typing import Any
 
+try:  # Package import path
+    from .tool_names import WRITE_TOOL_NAMES
+except ImportError:  # Script-copied hook path
+    from tool_names import WRITE_TOOL_NAMES  # type: ignore
+
 
 CLAUDE = "claude"
 CODEX = "codex"
@@ -37,6 +42,7 @@ class HookInput:
     event: str  # PreToolUse | PostToolUse | etc.
     tool_name: str
     file_path: str
+    file_paths: tuple[str, ...]
     command: str
     raw: dict[str, Any]  # full payload for advanced use
 
@@ -137,27 +143,31 @@ def _from_codex(payload: dict[str, Any], event_name: str | None) -> HookInput:
         tool_input = {}
 
     # Codex's apply_patch corresponds to Claude's Write/Edit. Normalize so
-    # downstream code that checks `tool_name in ("Write", "Edit")` keeps
+    # downstream code that checks `tool_name in WRITE_TOOL_NAMES` keeps
     # working without per-runtime branching.
     normalized_tool = tool_name
     file_path = ""
+    file_paths: tuple[str, ...] = ()
     command = ""
 
     if tool_name == "apply_patch":
-        normalized_tool = "Write"  # Treat as Write — same blast radius.
         # apply_patch input shape: {"input": "*** Begin Patch\n*** Add File: path\n..."}
-        # We extract file paths from the patch text.
-        file_path = _extract_path_from_patch(tool_input)
+        # We extract every touched file path from the patch text.
+        file_paths = _extract_paths_from_patch(tool_input)
+        file_path = file_paths[0] if file_paths else ""
+        normalized_tool = "Write" if _patch_has_add_file(tool_input) else "Edit"
     elif tool_name == "Bash":
         command = str(tool_input.get("command", ""))
-    elif tool_name in ("Edit", "Write"):
+    elif tool_name in WRITE_TOOL_NAMES:
         # Some MCP variants expose Write/Edit directly. Use the documented field.
         file_path = str(tool_input.get("file_path") or tool_input.get("path") or "")
+        file_paths = (file_path,) if file_path else ()
     elif tool_name.startswith("mcp__"):
         # MCP tools — best-effort path extraction
         for key in ("file_path", "path", "filename"):
             if key in tool_input:
                 file_path = str(tool_input[key])
+                file_paths = (file_path,) if file_path else ()
                 break
 
     return HookInput(
@@ -165,24 +175,27 @@ def _from_codex(payload: dict[str, Any], event_name: str | None) -> HookInput:
         event=str(payload.get("hook_event_name") or event_name or ""),
         tool_name=normalized_tool,
         file_path=file_path,
+        file_paths=file_paths,
         command=command,
         raw=payload,
     )
 
 
 def _from_claude_env(event_name: str | None) -> HookInput:
+    file_path = os.environ.get("CLAUDE_TOOL_INPUT_FILE_PATH", "")
     return HookInput(
         runtime=CLAUDE,
         event=event_name or os.environ.get("CLAUDE_HOOK_EVENT", ""),
         tool_name=os.environ.get("CLAUDE_TOOL_NAME", ""),
-        file_path=os.environ.get("CLAUDE_TOOL_INPUT_FILE_PATH", ""),
+        file_path=file_path,
+        file_paths=(file_path,) if file_path else (),
         command=os.environ.get("CLAUDE_TOOL_INPUT_COMMAND", ""),
         raw=dict(os.environ),
     )
 
 
-def _extract_path_from_patch(tool_input: dict[str, Any]) -> str:
-    """Pull the first target path from a codex apply_patch payload.
+def _extract_paths_from_patch(tool_input: dict[str, Any]) -> tuple[str, ...]:
+    """Pull all target paths from a codex apply_patch payload.
 
     Patch format excerpt:
       *** Begin Patch
@@ -193,10 +206,17 @@ def _extract_path_from_patch(tool_input: dict[str, Any]) -> str:
     """
     patch_text = str(tool_input.get("input") or tool_input.get("patch") or "")
     if not patch_text:
-        return ""
+        return ()
+    paths: list[str] = []
     for line in patch_text.splitlines():
         line = line.strip()
         for prefix in ("*** Add File: ", "*** Update File: ", "*** Delete File: "):
             if line.startswith(prefix):
-                return line[len(prefix):].strip()
-    return ""
+                paths.append(line[len(prefix):].strip())
+                break
+    return tuple(paths)
+
+
+def _patch_has_add_file(tool_input: dict[str, Any]) -> bool:
+    patch_text = str(tool_input.get("input") or tool_input.get("patch") or "")
+    return any(line.strip().startswith("*** Add File: ") for line in patch_text.splitlines())

@@ -86,9 +86,13 @@ REVIEW (Professor가 논문 평가 → ACCEPT/REVISE/REJECT)
 
 AI가 만든 실험 계획을 다른 AI 세션이 검증. 선행연구 충분? Baseline 있나? Phase 논리적? 부족하면 재생성.
 
+### ML 연구자 품질 기준
+
+모든 AI 세션에 공통 연구 품질 기준이 자동 주입된다. 정량 claim은 같은 문장에서 `research/iter_*/results/*.json` artifact로 추적 가능해야 하고, citation은 ref verification sidecar로 확인되어야 한다. data leakage 점검, non-ML/simple ML baseline, baseline comparison evidence, ablation/error analysis, 반복 실험 통계, seed, dataset fingerprint/source, split id, environment metadata, code provenance도 기본 요구사항이다. 실험 계획이 이 기준을 구조적으로 빠뜨리거나 planned phase가 `done`까지 완료되지 않으면 엔진이 거절한다.
+
 ### 논문 + 평가
 
-모든 실험이 끝나면 Story Teller가 전체 서사로 논문 작성. Professor가 5개 기준으로 평가. 부족하면 추가 실험.
+모든 실험이 끝나면 Story Teller가 전체 서사로 논문 작성. Professor가 5개 기준으로 평가. 부족하면 추가 실험. 최종 논문이 없거나 기본 논문 구조가 부족한데 `ACCEPT`를 받으면 엔진이 이를 차단한다. raw results에 없는 metric 숫자를 주장하거나, 평가 점수 합계와 `ACCEPT`/`REVISE`/`REJECT` 판정이 모순되는 경우도 통과하지 않는다.
 
 ## CLI
 
@@ -99,8 +103,15 @@ AI가 만든 실험 계획을 다른 AI 세션이 검증. 선행연구 충분? B
 | `tiny-lab run [idea]`        | 전자동 실행                        |
 | `tiny-lab run --model opus`  | 모델 선택 (sonnet/haiku/opus)      |
 | `tiny-lab run --max-iter 20` | 최대 iteration 수                  |
+| `tiny-lab run --max-steps 1` | 제한된 상태 수만 실행하는 smoke test |
+| `tiny-lab run --timeout-seconds 300` | AI state별 backend timeout override |
 | `tiny-lab status`            | 현재 상태                          |
+| `tiny-lab doctor [--probe-backend] [--repair-runner]` | 프로젝트/backend 실행 준비 점검 및 native runner 복구 |
+| `tiny-lab brief`             | 현재 state의 실행 계약 요약        |
+| `tiny-lab prompt`            | 현재 AI state 프롬프트 렌더링      |
+| `tiny-lab step`              | 엔진 핸들러로 한 state 진행        |
 | `tiny-lab board`             | 결과 대시보드                      |
+| `tiny-lab audit [--strict] [--all]` | 연구 품질 게이트 수동 점검         |
 | `tiny-lab stop`              | 정지                               |
 | `tiny-lab resume`            | 재개                               |
 
@@ -131,6 +142,8 @@ AI가 만든 실험 계획을 다른 AI 세션이 검증. 선행연구 충분? B
 tiny-lab run                       # claude 기본
 tiny-lab run --engine codex        # codex 백엔드
 tiny-lab run --engine claude --model opus
+tiny-lab run --max-steps 1         # 한 state만 실행하고 pause
+tiny-lab run --timeout-seconds 300 # AI state별 backend timeout override
 
 # 네이티브 모드 — Claude Code OR Codex CLI 채팅에서 인터랙티브
 #   Claude: .claude/skills/tiny-lab/SKILL.md 자동 로드

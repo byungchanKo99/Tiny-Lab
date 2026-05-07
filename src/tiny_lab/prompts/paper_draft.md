@@ -150,10 +150,11 @@ Read the actual phase scripts (research/{iter}/phases/) for implementation detai
 
 ## Important Rules
 
-1. Every claim must be backed by a specific result from results/\*.json
-2. Math formulas use LaTeX notation ($...$) — every model, loss, and metric must have a formula
-3. Reference actual generated plots: "As shown in Figure N (results/{current_phase_id}\_plot.png), ..."
-4. References use [Author, Year] from .domain_research.json
-5. Be honest about limitations — this strengthens the paper
-6. Tables must include std/CI, not just mean values
-7. Contributions must be explicitly stated in Introduction and revisited in Conclusion
+1. Every quantitative claim must cite a concrete artifact path in the same sentence, e.g. `research/iter_1/results/phase_2.json`. Claims without a path will be rejected by audit.
+2. Every `research/{iter}/results/*.json` artifact must be cited at least once in the paper, including negative, baseline, ablation, and failed-phase results. Do not cherry-pick only favorable artifacts.
+3. Math formulas use LaTeX notation ($...$) — every model, loss, and metric must have a formula
+4. Reference actual generated plots: "As shown in Figure N (results/{current_phase_id}\_plot.png), ..."
+5. References use [Author, Year] from .domain_research.json
+6. Be honest about limitations — this strengthens the paper
+7. Tables must include std/CI, not just mean values
+8. Contributions must be explicitly stated in Introduction and revisited in Conclusion

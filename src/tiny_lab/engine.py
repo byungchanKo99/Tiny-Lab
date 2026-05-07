@@ -5,23 +5,49 @@ All business logic lives in handlers/ — the engine just drives the loop.
 """
 from __future__ import annotations
 
-import json
-import shutil
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from . import events
-from .errors import TinyLabError
+from .advancement import (
+    apply_state_transition,
+    carry_over_iteration,
+    create_iteration_dirs,
+    resolve_next_state,
+    transition_starts_new_iteration,
+    update_iterations_log,
+)
+from .errors import BackendUnavailableError, StateError, TinyLabError
 from .handlers import EngineContext, HandlerRegistry, StateResult
 from .lock import Lock
 from .logging import log
 from .paths import (
-    iter_dir, phases_dir, results_dir, research_dir,
-    workflow_path, shared_dir, knowledge_dir, iterations_path, reflect_path,
+    iter_dir, research_dir,
+    workflow_path, shared_dir, knowledge_dir,
+    intervention_path,
 )
 from .plan import update_phase_status
+from .runner_contract import RunnerStateContract, resolve_runner_state_contract
 from .state import LoopState, load_state, save_state, set_state
 from .workflow import StateSpec, load_workflow
+
+
+@dataclass(frozen=True)
+class StepOutcome:
+    """Result of executing at most one state-machine step."""
+
+    executed: bool
+    state_before: str
+    state_after: str
+    message: str
+
+
+@dataclass(frozen=True)
+class PromptOutcome:
+    """Rendered prompt for the current native-runner AI session state."""
+
+    state: str
+    prompt: str
 
 
 class Engine:
@@ -33,6 +59,7 @@ class Engine:
         registry: HandlerRegistry,
         model: str = "sonnet",
         engine: str = "claude",
+        backend_timeout_seconds: float | None = None,
     ) -> None:
         self.project_dir = project_dir
         self.workflow = load_workflow(workflow_path(project_dir))
@@ -42,13 +69,129 @@ class Engine:
             workflow=self.workflow,
             model=model,
             engine=engine,
+            backend_timeout_seconds=backend_timeout_seconds,
         )
         self._shutdown = False
+        self._last_error: str | None = None
 
-    def run(self) -> None:
+    def run(self, max_steps: int | None = None) -> bool:
         with Lock(self.project_dir):
             self._init()
-            self._loop()
+            return self._loop(max_steps=max_steps)
+
+    def step_once(
+        self,
+        *,
+        run_ai: bool = False,
+        wait_checkpoint: bool = False,
+    ) -> StepOutcome:
+        """Execute at most one state-machine step.
+
+        Native runners use this to delegate deterministic process, phase,
+        and checkpoint transitions to the same handlers as the CLI engine
+        without starting the full autonomous loop.
+        """
+        with Lock(self.project_dir):
+            state_before_init = load_state(self.project_dir).state
+            self._init()
+            ls = load_state(self.project_dir)
+            if state_before_init == "INIT" and ls.state != "INIT":
+                return StepOutcome(True, "INIT", ls.state, f"initialized → {ls.state}")
+
+            state_before = ls.state
+            if ls.state == "DONE":
+                return StepOutcome(False, state_before, state_before, "already DONE")
+
+            try:
+                spec = self.workflow.get_state(ls.state)
+            except TinyLabError:
+                log(f"ENGINE: unknown state '{ls.state}', stopping without marking DONE")
+                return StepOutcome(
+                    False,
+                    state_before,
+                    state_before,
+                    f"{state_before} is missing from workflow; repair research/.workflow.json or research/.state.json",
+                )
+
+            if spec.type == "ai_session" and not run_ai:
+                return StepOutcome(
+                    False,
+                    state_before,
+                    state_before,
+                    f"{state_before} is an ai_session; complete its artifact natively or run with --run-ai",
+                )
+
+            if spec.type == "checkpoint" and not wait_checkpoint:
+                ipath = intervention_path(self.project_dir)
+                if not ipath.exists() and (spec.mandatory or self.ctx.autonomy.mode != "autonomous"):
+                    return StepOutcome(
+                        False,
+                        state_before,
+                        state_before,
+                        f"{state_before} is waiting for intervention",
+                    )
+
+            self._execute_current_state(ls)
+            state_after = load_state(self.project_dir).state
+            if self._shutdown:
+                detail = f": {self._last_error}" if self._last_error else ""
+                return StepOutcome(
+                    False,
+                    state_before,
+                    state_after,
+                    f"{state_before} failed{detail}",
+                )
+            return StepOutcome(
+                True,
+                state_before,
+                state_after,
+                f"{state_before} → {state_after}" if state_after != state_before else f"{state_before} completed",
+            )
+
+    def render_current_prompt(self) -> PromptOutcome:
+        """Render the current ai_session prompt through the same path used by the engine."""
+        with Lock(self.project_dir):
+            self._init()
+            ls = load_state(self.project_dir)
+            if ls.state == "DONE":
+                raise StateError("DONE has no prompt")
+
+            spec = self.workflow.get_state(ls.state)
+            if spec.type != "ai_session":
+                raise StateError(f"{ls.state} is a {spec.type} state; use tiny-lab step")
+
+            from .handlers.ai_session import render_ai_session_prompt
+
+            return PromptOutcome(
+                state=ls.state,
+                prompt=render_ai_session_prompt(spec, ls, self.ctx),
+            )
+
+    def current_state_briefing(self) -> RunnerStateContract:
+        """Return the current state contract resolved for the active iteration."""
+        with Lock(self.project_dir):
+            self._init()
+            ls = load_state(self.project_dir)
+            if ls.state == "DONE":
+                return resolve_runner_state_contract(
+                    state_id=ls.state,
+                    iteration=ls.current_iteration,
+                    current_phase_id=ls.current_phase_id,
+                    spec=None,
+                    default_engine=self.ctx.engine,
+                )
+
+            try:
+                spec = self.workflow.get_state(ls.state)
+            except TinyLabError:
+                spec = None
+            return resolve_runner_state_contract(
+                state_id=ls.state,
+                iteration=ls.current_iteration,
+                current_phase_id=ls.current_phase_id,
+                spec=spec,
+                default_engine=self.ctx.engine,
+            )
 
     # ------------------------------------------------------------------
     # Init
@@ -74,14 +217,15 @@ class Engine:
     # Main loop
     # ------------------------------------------------------------------
 
-    def _loop(self) -> None:
+    def _loop(self, max_steps: int | None = None) -> bool:
+        steps_executed = 0
         while not self._shutdown:
             ls = load_state(self.project_dir)
 
             if ls.state == "DONE":
                 log("ENGINE: reached DONE")
                 events.loop_done(self.project_dir, "completed")
-                break
+                return True
 
             if ls.current_iteration > self.workflow.autonomy.max_iterations:
                 # Don't cut off if we're in the synthesis/evaluation tail
@@ -89,40 +233,63 @@ class Engine:
                     log(f"ENGINE: max iterations ({self.workflow.autonomy.max_iterations}) reached → STORY_TELL")
                     if "STORY_TELL" in self.workflow._index:
                         set_state(self.project_dir, "STORY_TELL")
+                        continue
                     else:
                         set_state(self.project_dir, "DONE", resumable=False)
-                        break
+                        return True
 
             try:
                 spec = self.workflow.get_state(ls.state)
-            except Exception:
-                log(f"ENGINE: unknown state '{ls.state}', stopping")
-                set_state(self.project_dir, "DONE")
+            except TinyLabError:
+                log(f"ENGINE: unknown state '{ls.state}', stopping without marking DONE")
+                return False
+
+            self._execute_current_state(ls)
+            if self._shutdown:
                 break
 
-            log(f"ENGINE: entering {ls.state} (type={spec.type}, iter={ls.current_iteration})")
-            events.state_entered(self.project_dir, ls.state, ls.current_iteration)
+            steps_executed += 1
+            if max_steps is not None and steps_executed >= max_steps:
+                current = load_state(self.project_dir)
+                log(f"ENGINE: max steps ({max_steps}) reached, pausing at {current.state}")
+                return True
 
-            try:
-                handler = self.registry.get(spec)
-                result = handler.execute(spec, ls, self.ctx)
-                self._apply_result(result, spec, ls)
+        return False
 
-                # Reset consecutive failure counter on success
-                ls = load_state(self.project_dir)
-                if ls.consecutive_failures > 0:
-                    ls.consecutive_failures = 0
-                    save_state(self.project_dir, ls)
+    def _execute_current_state(self, ls: LoopState) -> None:
+        """Execute the current state once using the registered handler."""
+        spec = self.workflow.get_state(ls.state)
+        log(f"ENGINE: entering {ls.state} (type={spec.type}, iter={ls.current_iteration})")
+        events.state_entered(self.project_dir, ls.state, ls.current_iteration)
 
-            except TinyLabError as e:
-                log(f"ENGINE: error in {ls.state}: {e}")
-                events.error_occurred(self.project_dir, ls.state, str(e))
-                self._handle_error(spec, ls, e)
+        try:
+            handler = self.registry.get(spec)
+            result = handler.execute(spec, ls, self.ctx)
+            self._apply_result(result, spec, ls)
 
-            except Exception as e:
-                log(f"ENGINE: unexpected error in {ls.state}: {e}")
-                events.error_occurred(self.project_dir, ls.state, str(e))
-                self._handle_error(spec, ls, e)
+            # Reset consecutive failure counter on success
+            ls = load_state(self.project_dir)
+            if ls.consecutive_failures > 0:
+                ls.consecutive_failures = 0
+                save_state(self.project_dir, ls)
+
+        except BackendUnavailableError as e:
+            self._last_error = str(e)
+            log(f"ENGINE: backend unavailable in {ls.state}: {e}")
+            events.error_occurred(self.project_dir, ls.state, str(e))
+            self._shutdown = True
+
+        except TinyLabError as e:
+            self._last_error = str(e)
+            log(f"ENGINE: error in {ls.state}: {e}")
+            events.error_occurred(self.project_dir, ls.state, str(e))
+            self._handle_error(spec, ls, e)
+
+        except Exception as e:
+            self._last_error = str(e)
+            log(f"ENGINE: unexpected error in {ls.state}: {e}")
+            events.error_occurred(self.project_dir, ls.state, str(e))
+            self._handle_error(spec, ls, e)
 
     # ------------------------------------------------------------------
     # Result application
@@ -130,17 +297,17 @@ class Engine:
 
     def _apply_result(self, result: StateResult, spec: StateSpec, ls: LoopState) -> None:
         """Apply handler result to state machine."""
-        overrides = result.state_overrides
+        overrides = dict(result.state_overrides)
 
         if result.transition:
-            # New iteration check
-            if result.transition in ("IDEA_REFINE", "DOMAIN_RESEARCH"):
-                new_iter = ls.current_iteration + 1
-                self._create_iteration(new_iter)
-                self._carry_over(ls.current_iteration, new_iter, result.transition)
-                overrides["current_iteration"] = new_iter
-                overrides["session_id"] = None  # fresh session for new iteration
-            set_state(self.project_dir, result.transition, **overrides)
+            next_state = self._cap_review_transition_after_max_iterations(ls, result.transition, overrides)
+            apply_state_transition(
+                self.project_dir,
+                next_state,
+                current_state=ls,
+                state_overrides=overrides,
+                new_iteration_on_entry=transition_starts_new_iteration(ls.state, next_state),
+            )
         else:
             # Save overrides first (e.g. PHASE_SELECT setting current_phase_id)
             if overrides:
@@ -149,31 +316,50 @@ class Engine:
             # Then follow spec.next
             self._follow_next(spec, ls)
 
-    # States that start a fresh context (session reset)
-    _SESSION_RESET_STATES = frozenset({
-        "SHAPE_FULL",       # 연구 처음 시작 / REJECT 재시작
-        "PHASE_SELECT",     # phase loop 진입 — plan까지의 맥락 정리
-        "STORY_TELL",       # 최종 논문 — 모든 iter 결과를 파일에서 새로 읽음
-    })
-
     def _follow_next(self, spec: StateSpec, ls: LoopState) -> None:
         """Evaluate and apply spec.next transition."""
-        if isinstance(spec.next, str):
-            nxt = spec.next
-        elif isinstance(spec.next, dict) and spec.condition:
-            from .conditions import resolve_condition
-            current_ls = load_state(self.project_dir)
-            nxt = resolve_condition(
-                spec.condition, spec.next,
-                self.project_dir, current_ls.current_iteration,
-            )
-        else:
+        current_ls = load_state(self.project_dir)
+        nxt, problem = resolve_next_state(
+            spec,
+            self.project_dir,
+            current_ls.current_iteration,
+            current_phase_id=current_ls.current_phase_id,
+        )
+        if problem:
+            raise StateError(problem)
+        if not nxt:
             return
 
-        overrides: dict[str, Any] = {}
-        if nxt in self._SESSION_RESET_STATES:
+        overrides: dict[str, object] = {}
+        nxt = self._cap_review_transition_after_max_iterations(current_ls, nxt, overrides)
+        apply_state_transition(
+            self.project_dir,
+            nxt,
+            current_state=current_ls,
+            state_overrides=overrides,
+        )
+
+    def _cap_review_transition_after_max_iterations(
+        self,
+        ls: LoopState,
+        next_state: str,
+        overrides: dict[str, object],
+    ) -> str:
+        """Stop after final review when the configured iteration budget is exhausted."""
+        if (
+            ls.current_iteration >= self.workflow.autonomy.max_iterations
+            and ls.state == "REVIEW_DONE"
+            and next_state != "DONE"
+        ):
+            log(
+                "ENGINE: max iterations "
+                f"({self.workflow.autonomy.max_iterations}) reached; "
+                f"review requested {next_state}, stopping at DONE"
+            )
+            overrides["resumable"] = False
             overrides["session_id"] = None
-        set_state(self.project_dir, nxt, **overrides)
+            return "DONE"
+        return next_state
 
     # ------------------------------------------------------------------
     # Error handling
@@ -219,44 +405,11 @@ class Engine:
     # ------------------------------------------------------------------
 
     def _create_iteration(self, iteration: int) -> None:
-        idir = iter_dir(self.project_dir, iteration)
-        idir.mkdir(parents=True, exist_ok=True)
-        phases_dir(self.project_dir, iteration).mkdir(exist_ok=True)
-        results_dir(self.project_dir, iteration).mkdir(exist_ok=True)
-        log(f"ENGINE: created iteration directory {idir.name}")
+        create_iteration_dirs(self.project_dir, iteration)
+        log(f"ENGINE: created iteration directory {iter_dir(self.project_dir, iteration).name}")
 
     def _carry_over(self, from_iter: int, to_iter: int, entry_state: str) -> None:
-        src = iter_dir(self.project_dir, from_iter)
-        dst = iter_dir(self.project_dir, to_iter)
-
-        carry_map = {
-            "DATA_DEEP_DIVE": [".domain_research.json"],
-            "IDEA_REFINE": [".domain_research.json", ".data_analysis.json"],
-            "PLAN": [".domain_research.json", ".data_analysis.json", ".idea_refined.json"],
-        }
-        for fname in carry_map.get(entry_state, []):
-            src_file = src / fname
-            if src_file.exists():
-                shutil.copy2(src_file, dst / fname)
-                log(f"ENGINE: carried over {fname} to iter_{to_iter}")
-
-        self._update_iterations_log(from_iter)
+        carry_over_iteration(self.project_dir, from_iter, to_iter, entry_state)
 
     def _update_iterations_log(self, completed_iter: int) -> None:
-        ipath = iterations_path(self.project_dir)
-        data: dict[str, Any] = {"current_iteration": completed_iter + 1, "iterations": []}
-        if ipath.exists():
-            data = json.loads(ipath.read_text()) or data
-
-        rpath = reflect_path(self.project_dir, completed_iter)
-        reflect: dict[str, Any] = {}
-        if rpath.exists():
-            reflect = json.loads(rpath.read_text()) or {}
-
-        data["iterations"].append({
-            "id": completed_iter,
-            "decision": reflect.get("decision", "unknown"),
-            "reason": reflect.get("reason", ""),
-        })
-        data["current_iteration"] = completed_iter + 1
-        ipath.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+        update_iterations_log(self.project_dir, completed_iter)

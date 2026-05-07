@@ -7,61 +7,54 @@ in best-effort mode: errors do NOT block tool execution.
 
 Output: .ref_verification.json sidecar next to the source file.
 """
-import fnmatch
-import json
-import os
+import re
 import sys
 from pathlib import Path
 
-# Patterns of files whose writes should trigger verification.
-# Matches the discovery globs in tiny_lab/refs.py.
-_TRIGGER_PATTERNS = (
-    "*/.domain_research.json",
-    "*/.diverge.json",
-    "*/.papers_collected.json",
-    "*/.paper_analysis.json",
-    "*/.related_work.json",
-    "*/.evaluation_matrix.json",
-)
-
+sys.path.insert(0, str(Path(__file__).parent))
+from command_paths import bash_write_target_paths  # noqa: E402
+from hook_io import WRITE_TOOL_NAMES, read_hook_input  # noqa: E402
 
 def main() -> int:
-    tool_name = os.environ.get("CLAUDE_TOOL_NAME", "")
-    if tool_name not in ("Write", "Edit"):
+    hook = read_hook_input(event_name="PostToolUse")
+    if hook.tool_name not in WRITE_TOOL_NAMES and hook.tool_name != "Bash":
         return 0
 
-    written_file = os.environ.get("CLAUDE_TOOL_INPUT_FILE_PATH", "")
-    if not written_file:
+    written_files = list(hook.file_paths)
+    if hook.tool_name == "Bash":
+        written_files = bash_write_target_paths(hook.command)
+    if not written_files:
         return 0
 
-    # Match against trigger patterns
-    matches = any(
-        fnmatch.fnmatch(written_file, p) or fnmatch.fnmatch(written_file, "*/" + p)
-        for p in _TRIGGER_PATTERNS
-    )
-    if not matches:
-        return 0
+    for written_file in written_files:
+        _verify_written_file(written_file)
+    return 0
 
+
+def _verify_written_file(written_file: str) -> None:
+    if not _matches_trigger(written_file):
+        return
     src = Path(written_file)
     if not src.exists():
-        return 0
+        return
 
     # Late import — keep hook startup lean for non-matching writes.
     try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
         from tiny_lab.refs import verify_file, write_verification
     except ImportError:
         # tiny-lab not on PYTHONPATH (e.g. user opened the project before
         # installing). Bail silently — verification is opt-in safety net.
-        return 0
+        return
 
     try:
         result = verify_file(src)
     except Exception as e:
         print(f"ref_verify: skipped ({e})")
-        return 0
+        return
 
     if result.total == 0:
-        return 0  # nothing to verify in this artifact
+        return  # nothing to verify in this artifact
 
     out = write_verification(src, result)
     summary = (
@@ -71,9 +64,32 @@ def main() -> int:
     )
     print(f"ref_verify: {summary} → {out.name}")
 
-    # Non-blocking: even if some refs are not_found, return 0 so the engine
-    # can decide what to do (e.g., evaluate_matrix.md applies a penalty).
-    return 0
+
+def _matches_trigger(written_file: str) -> bool:
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+        from tiny_lab.refs import is_reference_artifact_candidate_path
+
+        return is_reference_artifact_candidate_path(written_file)
+    except ImportError:
+        return _fallback_reference_artifact_candidate_path(written_file)
+
+
+def _fallback_reference_artifact_candidate_path(written_file: str) -> bool:
+    candidate = Path(written_file)
+    text = candidate.as_posix()
+    if text.endswith(".ref_verification.json"):
+        return False
+    parts = candidate.parts
+    if any(part in {".", ".."} for part in parts):
+        return False
+    return any(
+        part == "research"
+        and index + 2 == len(parts) - 1
+        and re.fullmatch(r"iter_\d+", parts[index + 1]) is not None
+        and parts[index + 2].endswith(".json")
+        for index, part in enumerate(parts[:-2])
+    )
 
 
 if __name__ == "__main__":

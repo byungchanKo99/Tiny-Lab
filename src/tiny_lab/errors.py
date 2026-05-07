@@ -13,6 +13,10 @@ class StateError(TinyLabError):
     """State machine transition error."""
 
 
+class BackendUnavailableError(TinyLabError):
+    """AI backend is not ready to run, e.g. missing CLI or authentication."""
+
+
 class PhaseError(TinyLabError):
     """Phase execution error."""
 

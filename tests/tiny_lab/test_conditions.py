@@ -56,6 +56,30 @@ class TestFileCondition:
         result = resolve_condition(cond, {"yes": "GO"}, tmp_path, 2)
         assert result == "GO"
 
+    def test_iteration_placeholder(self, tmp_path):
+        (tmp_path / "research" / "iter_3").mkdir(parents=True)
+        (tmp_path / "research" / "iter_3" / "decision_3.json").write_text(json.dumps({"d": "yes"}))
+        cond = ConditionSpec(source="{iter}/decision_{iteration}.json", field="d")
+
+        result = resolve_condition(cond, {"yes": "GO"}, tmp_path, 3)
+
+        assert result == "GO"
+
+    def test_current_phase_id_placeholder(self, tmp_path):
+        (tmp_path / "research" / "iter_3" / "results").mkdir(parents=True)
+        (tmp_path / "research" / "iter_3" / "results" / "phase_2.json").write_text(json.dumps({"d": "yes"}))
+        cond = ConditionSpec(source="{iter}/results/{current_phase_id}.json", field="d")
+
+        result = resolve_condition(
+            cond,
+            {"yes": "GO"},
+            tmp_path,
+            3,
+            current_phase_id="phase_2",
+        )
+
+        assert result == "GO"
+
 
 class TestBuiltinCheck:
     def test_has_pending_phases_true(self, tmp_path):

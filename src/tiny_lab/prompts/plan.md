@@ -9,6 +9,8 @@ Read all three understanding artifacts:
 
 - research/{iter}/.domain_research.json — SOTA, preprocessing, metrics, pitfalls
 - research/{iter}/.data_analysis.json — data characteristics, quality issues
+- research/{iter}/.data_viz_manifest.json and research/{iter}/data_viz/*.png —
+  first-pass EDA evidence, quality risks, and modeling implications
 - research/{iter}/.idea_refined.json — concrete goal, inputs, outputs, metric, constraints
 
 ## Your Task
@@ -17,11 +19,19 @@ Create research/{iter}/research_plan.json — the execution blueprint.
 
 ## Plan structure
 
-The plan must have:
+Use the shared plan quality contract below for all engine-enforced structural, baseline, DAG, schema, and evidence requirements:
+
+{plan_quality_contract}
+
+The plan must also have:
 
 1. **name** and **description**
 
 2. **background** — problem, goal, data info, constraints, references (from understanding artifacts)
+
+   - Include the most important visual patterns from `.data_viz_manifest.json`
+     and explain how they shaped preprocessing, split, baseline, metric, or
+     error-analysis phases.
 
 3. **metric** — name, direction, target (from idea_refined)
 
@@ -35,19 +45,11 @@ The plan must have:
    - Evaluation metric: formal definition with formula
    - Example: if predicting position from IMU: $\hat{p}_t = f_\theta(X_{t-k:t})$ where $X \in \mathbb{R}^{T \times d}$
 
-5. **phases** — ordered list of research phases. Each phase must have:
+5. **phases** — ordered list of research phases following the shared plan quality contract.
 
-   - **id**: unique identifier (phase_0, phase_1, ...)
-   - **name**: human-readable name
-   - **why**: domain-grounded reason this phase is needed. No "why" = might get skipped.
-   - **type**: script | optimize | manual
-   - **depends_on**: list of phase IDs that must complete first
-   - **methodology**: step-by-step instructions for AI to generate code
-   - **expected_outputs**: files + report with JSON schema
-   - **visualization**: list of plots this phase must generate (e.g., "trajectory_comparison.png", "error_distribution.png"). Every phase should have at least one visualization.
-   - **status**: "pending"
+   - Every new executable phase must start with `"status": "pending"` so PHASE_SELECT will run it.
 
-6. **baselines** — explicit list of baselines to compare against:
+6. **baselines** — explicit list of baselines to compare against, following the shared plan quality contract:
 
    - Physical/statistical baselines (no ML)
    - Simple ML baselines (linear, decision tree)
@@ -55,18 +57,14 @@ The plan must have:
    - Each baseline must have a dedicated phase or be part of one
 
 7. **experiment_checklist** — self-audit of experiment completeness:
-   - Has a non-ML baseline? (yes/no)
-   - Has statistical measures beyond mean? (std, CI, significance test)
-   - Has ablation study or feature importance?
-   - Has cross-validation or multiple splits?
-   - Has error analysis phase?
-   - Missing items should be added as phases
+   - Follow every checklist item named by the shared plan quality contract.
+   - Missing items should be added as phases, schemas, or baseline entries.
 
 ## Critical principles
 
 1. Every phase MUST have a file path for its output
    BAD: "record the results"
-   GOOD: "write to research/results/phase_1.json"
+   GOOD: "write to research/{iter}/results/phase_1.json"
 
 2. JSON schema MUST be defined for every report
    The schema determines what the AI measures. If "n_params" is in the schema, it counts parameters. If not, it doesn't.
@@ -83,9 +81,17 @@ The plan must have:
 6. Every phase MUST have visualization
    Even preprocessing: show before/after distributions, correlation heatmaps, etc.
 
-7. Results must include statistics
-   Not just "ATE = 50m" but "ATE = 50.3 ± 2.1m (mean ± std over 5 runs)"
-   Require std, min, max, and CI where applicable in expected_outputs schemas.
+7. The plan must react to initial EDA visual evidence
+   If `.data_viz_manifest.json` reports quality risks, target relationships,
+   leakage candidates, imbalance, drift, or missingness, include phases or
+   schema fields that directly test those risks. Do not ignore the
+   `researcher_readout`.
+
+8. Results must materialize the shared evidence contract
+   Not just "ATE = 50m" but "ATE = 50.3 ± 2.1m (mean ± std over 5 runs)".
+   Every experimental report schema must request the applicable fields from this shared contract:
+
+{evidence_contract}
 
 ## Phase ordering guidance
 
@@ -105,4 +111,4 @@ Not all phases are needed. The domain research and idea determine which are rele
 
 ## Write the plan
 
-Write to research/{iter}/research_plan.json with at least: name, formal_notation, baselines, experiment_checklist, phases (each with id, name, why, type, methodology, expected_outputs, visualization, status).
+Write to research/{iter}/research_plan.json with at least: name, formal_notation, baselines, experiment_checklist, phases (each with id, name, why, type, methodology, expected_outputs, visualization, status). Use `"status": "pending"` for phases that still need execution; do not use `"todo"` unless you are preserving an existing plan that already used it.

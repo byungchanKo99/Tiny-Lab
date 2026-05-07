@@ -118,7 +118,13 @@ def run_optimize(
                 cwd=str(project_dir), timeout=time_budget + 60,
             )
             value = _extract_metric(result.stdout, metric_name) if result.returncode == 0 else None
-            trial = {"approach": approach_name, "params": {}, "value": value, "state": "complete" if value else "fail"}
+            trial = {
+                "approach": approach_name,
+                "params": {},
+                "command": cmd,
+                "value": value,
+                "state": "complete" if value is not None else "fail",
+            }
             all_trials.append(trial)
             if value is not None and _is_better(value, best_value, direction):
                 best_value = value
@@ -158,7 +164,9 @@ def run_optimize(
 
             trial = {
                 "approach": approach_name, "params": params,
-                "value": value, "state": "complete" if value is not None else "fail",
+                "command": cmd,
+                "value": value,
+                "state": "complete" if value is not None else "fail",
             }
             all_trials.append(trial)
 

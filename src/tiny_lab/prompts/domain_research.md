@@ -9,11 +9,19 @@ The user has an idea for a research project. Before planning anything, you must 
 
 ## Step 1: Read the user's idea
 
-Read research/.user_idea.txt if it exists. This is the user's raw research intent.
+Read research/{iter}/.iteration_seed.json if it exists. When present, this
+is the active research direction for the current iteration; use `new_idea`,
+`future_iteration_seed`, `selected_direction`, `selection_rationale`,
+`idea_portfolio`, and `rationale` as the research intent. Treat
+`selected_direction` as the chosen direction and use `idea_portfolio` only as
+context for why alternatives were deferred or discarded. If that file does not exist, read
+research/{iter}/.explore_seed.json if it exists and use `new_seed`,
+`selected_direction`, and `rationale`. Otherwise, read research/.user_idea.txt
+if it exists. This is the user's raw research intent.
 
-## Step 2: Search academic literature
+## Step 2: Search academic literature, bounded
 
-Use WebSearch to find relevant papers and techniques. Search MULTIPLE queries:
+Use WebSearch when it is available, but keep this state bounded enough for full-auto execution. Run at most two high-value searches before writing the artifact:
 
 1. Domain-specific state of the art:
 
@@ -34,6 +42,8 @@ Use WebSearch to find relevant papers and techniques. Search MULTIPLE queries:
    - "common mistakes {domain} machine learning"
    - "{domain} data leakage preprocessing"
 
+If WebSearch/WebFetch is unavailable, slow, or unnecessary for a synthetic/local task, do not stall. Write a conservative offline artifact with `references: []`, clearly mark `literature_search_status` as "offline_or_unavailable", and base `sota_models`, metrics, preprocessing, and pitfalls on stable general ML knowledge. Do not claim novelty, SOTA, or prior-work superiority from an offline artifact.
+
 ## Step 3: Synthesize findings
 
 Write your findings to research/{iter}/.domain_research.json with these required fields:
@@ -44,6 +54,7 @@ Write your findings to research/{iter}/.domain_research.json with these required
 - standard_metrics: what metrics are standard in this domain
 - known_pitfalls: things that commonly go wrong
 - references: list of papers/URLs with author, year, key findings
+- literature_search_status: "searched" or "offline_or_unavailable"
 
 ## Step 4: Save to shared knowledge
 

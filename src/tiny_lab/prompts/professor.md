@@ -23,6 +23,9 @@ Score each criterion on a 1-10 scale.
 - Are claims supported by evidence? Can every number in the paper be traced to raw results?
 - Is the methodology described well enough to reproduce?
 - Are limitations honestly stated?
+- Do result artifacts include seeds, dataset fingerprints or sources, split
+  identifiers, environment metadata, and code provenance sufficient to reproduce
+  the work?
 
 Scoring guide:
 
@@ -40,6 +43,8 @@ Scoring guide:
 - Are there multiple evaluation metrics, not just one?
 - Is there cross-validation or multiple data splits?
 - Is there sensitivity analysis (how robust are results to hyperparameters)?
+- Was train/test, target, temporal, group, duplicate, and preprocessing
+  leakage explicitly checked or ruled out?
 
 Scoring guide:
 
@@ -99,9 +104,9 @@ Scoring guide:
 
 Calculate total = sum of all scores (max 50).
 
-- **ACCEPT** (total >= 40): Research is complete. Quality is sufficient.
-- **REVISE** (35 <= total < 40): Promising but needs more work. Specify exactly what experiments or analysis to add. The system will run a new full iteration to address gaps.
-- **REJECT** (total < 35): Fundamental issues. The research direction or framing needs rethinking. The system will restart from input shaping.
+Use the shared evaluation contract below for verdict thresholds, required score fields, feedback consistency, and required action rules:
+
+{evaluation_contract}
 
 ## Output
 
@@ -122,12 +127,13 @@ Write research/evaluation.json:
     {
       "criterion": "experimental_sufficiency",
       "score": 6,
-      "issue": "specific problem found",
-      "suggestion": "concrete action to address it"
+      "issue": "specific problem found in research/final_paper.md and research/iter_1/results/phase_0.json",
+      "evidence": "research/final_paper.md; research/iter_1/results/phase_0.json",
+      "recommendation": "concrete action to address it"
     }
   ],
   "summary": "2-3 sentence overall assessment",
-  "required_actions": ["specific experiments or changes needed if REVISE"],
+  "required_actions": ["required for REVISE or REJECT: concrete research actions such as rerun baseline comparison, add leakage audit, fix unsupported metric claims, or reframe dataset split"],
   "strengths": ["what the paper does well"],
   "weaknesses": ["what needs improvement"]
 }
@@ -138,5 +144,7 @@ Write research/evaluation.json:
 - Be a FAIR but DEMANDING reviewer. Don't inflate scores to pass a weak paper.
 - Verify numbers. If the paper claims "ATE = 45.2m", check that iter\_\*/results/ contains this value.
 - REVISE means "this is salvageable with more experiments." Give specific, actionable feedback.
-- REJECT means "this needs to be rethought." Explain what's fundamentally wrong.
+- REJECT means "this needs to be rethought." Give specific, actionable restart instructions.
+- For ACCEPT, every feedback item must cite concrete artifact paths such as research/final_paper.md and the relevant research/iter\_\*/results/\*.json file.
+- Follow the shared evaluation contract exactly: an ACCEPT with unresolved required work, mismatched feedback scores, or any criterion below the ACCEPT floor is invalid.
 - Don't penalize honest limitations. Penalize claims unsupported by evidence.

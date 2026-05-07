@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 
+from ..advancement import resolve_next_state_from_value
+from ..errors import StateError
 from ..logging import log
 from ..paths import iter_dir
 from ..state import LoopState
@@ -37,11 +39,14 @@ class ReflectDoneHandler:
                 reflect_path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
             decision = "idea_mutation"
 
-        # Resolve next state from spec.next map
-        if isinstance(spec.next, dict):
-            target = spec.next.get(decision, spec.next.get("done", "DONE"))
-        else:
-            target = spec.next or "DONE"
+        target, problem = resolve_next_state_from_value(
+            spec,
+            decision,
+            fallback_values=("done",),
+            default_state="DONE",
+        )
+        if problem:
+            raise StateError(problem)
 
         log(f"ENGINE: reflect decision={decision} → {target}")
-        return StateResult(transition=target)
+        return StateResult(transition=target or "DONE")

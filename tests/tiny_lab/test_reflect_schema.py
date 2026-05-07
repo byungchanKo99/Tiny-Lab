@@ -116,6 +116,9 @@ class TestReflectPromptDocumentsNewFields:
             "drift_warning",
             "pivot_trigger",
             "framing_change",
+            "idea_portfolio",
+            "selected_direction",
+            "selection_rationale",
             "abandoned_hypotheses",
         ):
             assert required_field in text, (

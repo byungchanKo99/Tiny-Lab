@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import subprocess
 import sys
@@ -11,9 +12,22 @@ from typing import Any
 from .. import events
 from ..errors import StateError
 from ..logging import log
-from ..paths import phases_dir, results_dir, intervention_path, knowledge_dir
+from ..paths import phases_dir, results_dir, intervention_path, knowledge_dir, resolve_research_results_path
+from ..phase_contract import select_phase_script
+from ..provenance import audit_code_provenance
+from ..quality import audit_phase_result_artifact_contract, audit_phase_result_consistency
 from ..plan import load_plan, next_pending_phase, update_phase_status
+from ..result_schema import (
+    schema_expected_fields,
+    schema_fields_to_validate,
+    validate_finite_numeric_values,
+    validate_phase_identity,
+    validate_result_object,
+    validate_schema_types,
+    validate_substantive_result_values,
+)
 from ..state import LoopState
+from ..visualizations import phase_visualization_issues
 from ..workflow import StateSpec
 from . import EngineContext, StateResult
 
@@ -74,8 +88,10 @@ class PhaseRunHandler:
                 json.dumps(marker, indent=2)
             )
             return StateResult(transition="CHECKPOINT")
-        else:
+        elif phase_type == "script":
             _run_script(phase, ls, ctx)
+        else:
+            raise StateError(f"Unknown phase type for {phase_id}: {phase_type}")
 
         return StateResult()  # use spec.next
 
@@ -83,11 +99,10 @@ class PhaseRunHandler:
 def _run_script(phase: dict[str, Any], ls: LoopState, ctx: EngineContext) -> None:
     phase_id = phase["id"]
     pdir = phases_dir(ctx.project_dir, ls.current_iteration)
-    scripts = list(pdir.glob(f"*{phase_id}*"))
-    if not scripts:
-        raise StateError(f"No script found for phase {phase_id} in {pdir}")
-
-    script = scripts[0]
+    try:
+        script = select_phase_script(pdir, phase_id)
+    except ValueError as e:
+        raise StateError(str(e)) from e
     log(f"ENGINE: running {script.name}")
 
     rdir = results_dir(ctx.project_dir, ls.current_iteration)
@@ -140,6 +155,7 @@ def _run_script(phase: dict[str, Any], ls: LoopState, ctx: EngineContext) -> Non
     if error_file.exists():
         error_file.unlink()
 
+    _stamp_script_provenance(phase, script, ls, ctx)
     log(f"ENGINE: phase {phase_id} script completed")
 
 
@@ -154,13 +170,14 @@ def _run_optimize(phase: dict[str, Any], ls: LoopState, ctx: EngineContext) -> N
     direction = metric.get("direction", "minimize")
 
     pdir = phases_dir(ctx.project_dir, ls.current_iteration)
-    scripts = list(pdir.glob(f"*{phase_id}*"))
-    if not scripts:
-        raise StateError(f"No script found for optimize phase {phase_id}")
+    try:
+        script = select_phase_script(pdir, phase_id)
+    except ValueError as e:
+        raise StateError(str(e)) from e
 
     log(f"ENGINE: running optimize phase {phase_id}")
     result = run_optimize(
-        base_command=f"{sys.executable} {scripts[0]}",
+        base_command=f"{sys.executable} {script}",
         phase_config=opt_config,
         metric_name=metric_name,
         direction=direction,
@@ -175,9 +192,221 @@ def _run_optimize(phase: dict[str, Any], ls: LoopState, ctx: EngineContext) -> N
         "best_params": result.best_params,
         "n_trials": result.n_trials,
         "total_seconds": result.total_seconds,
+        "optimization_metric": metric_name,
+        "optimization_direction": direction,
+        "selection_criterion": f"{direction} {metric_name}",
+        "optimization_config": opt_config,
         "all_trials": result.all_trials,
+        **_script_provenance(script, ctx.project_dir),
     }, indent=2, default=str))
     log(f"ENGINE: optimize phase {phase_id} done — best {metric_name}={result.best_value}")
+
+
+def _stamp_script_provenance(phase: dict[str, Any], script: Path, ls: LoopState, ctx: EngineContext) -> None:
+    """Record the actual executed script in the phase result JSON."""
+    report_path = _phase_report_path(phase, ls, ctx)
+    if not report_path.exists():
+        return
+    try:
+        data = json.loads(report_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(data, dict):
+        return
+
+    provenance = _script_provenance(script, ctx.project_dir)
+    paths = _provenance_field_paths_to_write(data, phase)
+    changed = False
+    for path in paths:
+        field = path[-1]
+        if field in provenance and _get_provenance_path(data, path) != provenance[field]:
+            if _set_provenance_path(data, path, provenance[field]):
+                changed = True
+    if not paths:
+        for field in ("script_path", "script_sha256"):
+            if data.get(field) != provenance[field]:
+                data[field] = provenance[field]
+                changed = True
+    if changed:
+        report_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+
+
+def _phase_report_path(phase: dict[str, Any], ls: LoopState, ctx: EngineContext) -> Path:
+    report_path = phase.get("expected_outputs", {}).get("report", {}).get("path")
+    if report_path:
+        try:
+            return resolve_research_results_path(
+                ctx.project_dir,
+                report_path,
+                ls.current_iteration,
+                "expected_outputs.report.path",
+            )
+        except ValueError as e:
+            raise StateError(f"Unsafe report path for {phase['id']}: {e}") from e
+    return results_dir(ctx.project_dir, ls.current_iteration) / f"{phase['id']}.json"
+
+
+def _provenance_field_paths_to_write(data: dict[str, Any], phase: dict[str, Any]) -> list[tuple[str, ...]]:
+    schema = phase.get("expected_outputs", {}).get("report", {}).get("schema", {})
+    paths = [
+        *_schema_provenance_paths(schema),
+        *_data_provenance_paths(data),
+    ]
+    paths = list(dict.fromkeys(paths))
+    prefix = _preferred_provenance_prefix(paths)
+    if not any(path[-1] in _CODE_PATH_FIELD_VALUES for path in paths):
+        paths.append((*prefix, "script_path"))
+    if not any(path[-1] in _CODE_HASH_FIELD_VALUES for path in paths):
+        paths.append((*prefix, "script_sha256"))
+    return list(dict.fromkeys(paths))
+
+
+def _preferred_provenance_prefix(paths: list[tuple[str, ...]]) -> tuple[str, ...]:
+    for path in paths:
+        if path[-1] in _CODE_PATH_FIELD_VALUES or path[-1] in _CODE_HASH_FIELD_VALUES:
+            return path[:-1]
+    for path in paths:
+        return path[:-1]
+    return ()
+
+
+def _schema_provenance_paths(schema: Any, prefix: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
+    if not isinstance(schema, dict):
+        return []
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        entries = properties.items()
+    else:
+        entries = (
+            (key, value)
+            for key, value in schema.items()
+            if key not in _JSON_SCHEMA_CONTAINER_KEYS and isinstance(value, dict)
+        )
+
+    paths: list[tuple[str, ...]] = []
+    for key, child in entries:
+        child_path = (*prefix, str(key))
+        if str(key) in _PROVENANCE_FIELD_VALUES:
+            paths.append(child_path)
+        paths.extend(_schema_provenance_paths(child, child_path))
+    return paths
+
+
+def _data_provenance_paths(value: Any, prefix: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
+    if not isinstance(value, dict):
+        return []
+    paths: list[tuple[str, ...]] = []
+    for key, child in value.items():
+        child_path = (*prefix, str(key))
+        if str(key) in _PROVENANCE_FIELD_VALUES:
+            paths.append(child_path)
+        paths.extend(_data_provenance_paths(child, child_path))
+    return paths
+
+
+def _get_provenance_path(data: dict[str, Any], path: tuple[str, ...]) -> Any:
+    value: Any = data
+    for key in path:
+        if not isinstance(value, dict):
+            return None
+        value = value.get(key)
+    return value
+
+
+def _set_provenance_path(data: dict[str, Any], path: tuple[str, ...], value: str) -> bool:
+    target: Any = data
+    for key in path[:-1]:
+        if key not in target:
+            target[key] = {}
+        target = target[key]
+        if not isinstance(target, dict):
+            return False
+    target[path[-1]] = value
+    return True
+
+
+def _script_provenance(script: Path, project_dir: Path) -> dict[str, str]:
+    rel_script = _relative_posix(script, project_dir)
+    digest = "sha256:" + hashlib.sha256(script.read_bytes()).hexdigest()
+    git_commit = _git_commit(project_dir)
+    return {
+        "script_path": rel_script,
+        "code_path": rel_script,
+        "script_sha256": digest,
+        "script_sha": digest,
+        "script_hash": digest,
+        "code_sha256": digest,
+        "code_sha": digest,
+        "code_hash": digest,
+        "source_hash": digest,
+        "git_commit": git_commit,
+        "commit_hash": git_commit,
+    }
+
+
+def _relative_posix(path: Path, root: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _git_commit(project_dir: Path) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            cwd=str(project_dir),
+            timeout=2,
+        )
+    except Exception:
+        return "unavailable"
+    commit = result.stdout.strip()
+    return commit if result.returncode == 0 and commit else "unavailable"
+
+
+_PROVENANCE_FIELD_VALUES = {
+    "script_path",
+    "code_path",
+    "script_sha256",
+    "script_sha",
+    "script_hash",
+    "code_sha256",
+    "code_sha",
+    "code_hash",
+    "source_hash",
+    "git_commit",
+    "commit_hash",
+}
+
+_CODE_PATH_FIELD_VALUES = {
+    "script_path",
+    "code_path",
+}
+
+_CODE_HASH_FIELD_VALUES = {
+    "script_sha256",
+    "script_sha",
+    "script_hash",
+    "code_sha256",
+    "code_sha",
+    "code_hash",
+    "source_hash",
+}
+
+_JSON_SCHEMA_CONTAINER_KEYS = {
+    "$schema",
+    "$id",
+    "additionalProperties",
+    "description",
+    "enum",
+    "items",
+    "properties",
+    "required",
+    "title",
+    "type",
+}
 
 
 class PhaseEvaluateHandler:
@@ -199,20 +428,59 @@ class PhaseEvaluateHandler:
             log(f"ENGINE: no expected_outputs.report for {phase_id}, skipping validation")
             return StateResult()
 
-        report_path = ctx.project_dir / report_spec["path"]
+        try:
+            report_path = resolve_research_results_path(
+                ctx.project_dir,
+                report_spec.get("path"),
+                ls.current_iteration,
+                "expected_outputs.report.path",
+            )
+        except ValueError as e:
+            raise StateError(f"Unsafe report path for {phase_id}: {e}") from e
         if not report_path.exists():
             raise StateError(f"Expected report not found: {report_path}")
 
-        schema = report_spec.get("schema", {})
-        if schema:
+        try:
             data = json.loads(report_path.read_text())
-            if "properties" in schema:
-                expected_fields = list(schema.get("required", schema["properties"].keys()))
-            else:
-                expected_fields = list(schema.keys())
+        except json.JSONDecodeError as e:
+            raise StateError(f"Invalid report JSON: {e}") from e
+        object_error = validate_result_object(data)
+        if object_error:
+            raise StateError(object_error)
+        finite_errors = validate_finite_numeric_values(data)
+        if finite_errors:
+            raise StateError(f"Report numeric value errors: {finite_errors}")
+        provenance_errors = audit_code_provenance(ctx.project_dir, ls.current_iteration, data)
+        if provenance_errors:
+            raise StateError(f"Report code provenance errors: {provenance_errors}")
+        identity_errors = validate_phase_identity(data, phase_id)
+        if identity_errors:
+            raise StateError(f"Report phase identity errors: {identity_errors}")
+
+        schema = report_spec.get("schema", {})
+        validation_fields: list[str] = []
+        expected_fields: list[str] = []
+        if schema:
+            expected_fields = schema_expected_fields(schema)
+            validation_fields = schema_fields_to_validate(data, schema, expected_fields)
             missing = [k for k in expected_fields if k not in data]
             if missing:
                 raise StateError(f"Report missing fields: {missing}")
+            type_errors = validate_schema_types(data, schema, expected_fields)
+            if type_errors:
+                raise StateError(f"Report schema type errors: {type_errors}")
+        substantive_fields = list(dict.fromkeys([*validation_fields, *expected_fields, *data.keys()]))
+        value_errors = validate_substantive_result_values(data, substantive_fields)
+        if value_errors:
+            raise StateError(f"Report substantive value errors: {value_errors}")
+        consistency_errors = audit_phase_result_consistency(plan, phase_id, data)
+        if consistency_errors:
+            raise StateError(f"Report consistency errors: {consistency_errors}")
+        contract_errors = audit_phase_result_artifact_contract(plan, phase, phase_id, data)
+        if contract_errors:
+            raise StateError(f"Report artifact contract errors: {contract_errors}")
+
+        _validate_visualizations(phase, ls, ctx)
 
         log(f"ENGINE: phase {phase_id} output validated")
         return StateResult()
@@ -227,3 +495,17 @@ class PhaseRecordHandler:
             events.phase_completed(ctx.project_dir, ls.current_phase_id, ls.current_iteration, "done")
             log(f"ENGINE: phase {ls.current_phase_id} recorded as done")
         return StateResult()
+
+
+def _validate_visualizations(phase: dict[str, Any], ls: LoopState, ctx: EngineContext) -> None:
+    """Validate that planned phase visualizations were actually generated."""
+    phase_id = phase["id"]
+    issues = phase_visualization_issues(ctx.project_dir, ls.current_iteration, phase)
+    if not issues:
+        return
+    first = issues[0]
+    if first.startswith("missing visualizations: "):
+        raise StateError(f"Missing visualization files for {phase_id}: {first.removeprefix('missing visualizations: ')}")
+    if first == "missing required PNG visualization":
+        raise StateError(f"Phase {phase_id} did not generate a required PNG visualization")
+    raise StateError(f"Phase {phase_id} visualization issues: {'; '.join(issues)}")

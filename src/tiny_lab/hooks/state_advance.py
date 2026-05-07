@@ -6,115 +6,120 @@ this hook validates required fields and transitions to the next state.
 
 Dual-mode: works under both Claude Code and Codex CLI.
 """
-import fnmatch
-import json
 import sys
 from pathlib import Path
 
 # Sibling import — same trick as state_gate.py
 sys.path.insert(0, str(Path(__file__).parent))
-from hook_io import read_hook_input  # noqa: E402
+from command_paths import bash_write_target_paths  # noqa: E402
+from hook_io import WRITE_TOOL_NAMES, read_hook_input  # noqa: E402
 
-WORKFLOW = Path("research/.workflow.json")
-STATE_FILE = Path("research/.state.json")
+# Source-tree import when hooks are run directly from src/tiny_lab/hooks.
+# Installed-package imports still work when hooks are copied into .claude/hooks.
+try:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from tiny_lab.advancement import (  # type: ignore  # noqa: E402
+        apply_state_transition,
+        resolve_runner_completion_advance,
+        transition_starts_new_iteration,
+    )
+    from tiny_lab.final_paper import try_write_traceable_final_paper_for_problem  # type: ignore  # noqa: E402
+    from tiny_lab.runner_contract import load_runner_state_snapshot  # type: ignore  # noqa: E402
+except Exception:  # pragma: no cover - hooks should fail open if package import is unavailable
+    apply_state_transition = None
+    resolve_runner_completion_advance = None
+    try_write_traceable_final_paper_for_problem = None
+    load_runner_state_snapshot = None
+    transition_starts_new_iteration = None
 
 
 def main() -> int:
-    if not STATE_FILE.exists() or not WORKFLOW.exists():
-        return 0
-
     hook = read_hook_input(event_name="PostToolUse")
-    if hook.tool_name not in ("Write", "Edit"):
+    if hook.tool_name not in WRITE_TOOL_NAMES and hook.tool_name != "Bash":
         return 0
 
-    written_file = hook.file_path
-    if not written_file:
+    written_files = hook.file_paths
+    if hook.tool_name == "Bash":
+        written_files = tuple(bash_write_target_paths(hook.command))
+    if not written_files:
         return 0
 
-    try:
-        state_data = json.loads(STATE_FILE.read_text())
-        wf_data = json.loads(WORKFLOW.read_text())
-    except (json.JSONDecodeError, OSError):
+    if (
+        load_runner_state_snapshot is None
+        or resolve_runner_completion_advance is None
+        or apply_state_transition is None
+        or transition_starts_new_iteration is None
+    ):
         return 0
 
-    current_state = state_data.get("state", "INIT")
-    iteration = state_data.get("current_iteration", 1)
+    snapshot = load_runner_state_snapshot(Path.cwd())
+    if snapshot is None:
+        return 0
+
+    contract = snapshot.contract
     # Silent on terminal states — same reasoning as state_gate.py
-    if current_state in ("INIT", "DONE"):
+    if contract.state in ("INIT", "DONE"):
         return 0
 
-    # Find current state spec
-    spec = next((s for s in wf_data.get("states", []) if s["id"] == current_state), None)
-    if not spec or "completion" not in spec:
+    if not snapshot.state_spec or not contract.completion_artifact:
         return 0
 
     # Only ai_session states auto-advance via hook
-    if spec.get("type") != "ai_session":
+    if contract.state_type != "ai_session":
         return 0
 
-    comp = spec["completion"]
-    artifact_pattern = comp.get("artifact", "")
-    if not artifact_pattern:
-        return 0
-
-    iter_str = f"iter_{iteration}"
-    resolved = artifact_pattern.replace("{iter}", iter_str)
-
-    # Check if written file matches completion artifact pattern
-    if not (fnmatch.fnmatch(written_file, resolved) or
-            fnmatch.fnmatch(written_file, "*/" + resolved)):
-        return 0
-
-    # Validate required fields
-    required = comp.get("required_fields", [])
-    if required:
-        try:
-            data = json.loads(Path(written_file).read_text())
-            if not isinstance(data, dict):
-                print(f"Completion artifact is not a dict: {written_file}")
+    for written_file in written_files:
+        advance = resolve_runner_completion_advance(
+            Path.cwd(),
+            contract,
+            written_file=written_file,
+        )
+        if not advance.relevant:
+            continue
+        if advance.problem:
+            fallback_advance = _try_final_paper_fallback(Path.cwd(), contract, written_file, advance.problem)
+            if fallback_advance is not None:
+                advance = fallback_advance
+            else:
+                print(advance.problem[:1].upper() + advance.problem[1:])
                 return 0
-            missing = [f for f in required if f not in data]
-            if missing:
-                print(f"Missing required fields: {missing}")
-                return 0
-        except Exception as e:
-            print(f"Could not validate artifact: {e}")
+        if advance.problem:
+            print(advance.problem[:1].upper() + advance.problem[1:])
+            return 0
+        if not advance.next_state:
             return 0
 
-    # Resolve next state
-    next_state = spec.get("next")
-    if isinstance(next_state, str):
-        resolved_next = next_state
-    elif isinstance(next_state, dict) and "condition" in spec:
-        resolved_next = _resolve_conditional_next(spec, next_state, iter_str)
-        if not resolved_next:
-            return 0  # Let engine handle
-    else:
+        apply_state_transition(
+            Path.cwd(),
+            advance.next_state,
+            current_state=snapshot.state_data,
+            new_iteration_on_entry=transition_starts_new_iteration(contract.state, advance.next_state),
+        )
+        print(f"State: {contract.state} → {advance.next_state}")
         return 0
-
-    # Advance state
-    state_data["state"] = resolved_next
-    STATE_FILE.write_text(json.dumps(state_data, indent=2) + "\n")
-    print(f"State: {current_state} → {resolved_next}")
     return 0
 
 
-def _resolve_conditional_next(spec: dict, next_map: dict, iter_str: str) -> str | None:
-    """Resolve conditional next from artifact field."""
-    cond = spec["condition"]
-    source = cond.get("source")
-    field = cond.get("field")
-
-    if not source or not field:
-        return None  # Builtin check conditions handled by engine
-
+def _try_final_paper_fallback(project_dir: Path, contract, written_file: str | Path, problem: str):
+    if try_write_traceable_final_paper_for_problem is None:
+        return None
+    if not str(written_file).endswith("research/final_paper.md"):
+        return None
     try:
-        cond_path = Path("research") / source.replace("{iter}", iter_str)
-        cond_data = json.loads(cond_path.read_text())
-        value = str(cond_data.get(field, ""))
-        return next_map.get(value)
+        wrote = try_write_traceable_final_paper_for_problem(project_dir, contract.iteration, problem)
     except Exception:
         return None
+    if not wrote:
+        return None
+    fallback_advance = resolve_runner_completion_advance(
+        project_dir,
+        contract,
+        written_file=written_file,
+    )
+    if not fallback_advance.relevant or fallback_advance.problem:
+        return None
+    print("Traceable final paper fallback applied")
+    return fallback_advance
 
 
 if __name__ == "__main__":

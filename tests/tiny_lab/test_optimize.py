@@ -83,6 +83,7 @@ class TestRunOptimize:
         )
         assert result.n_trials == 1
         assert result.best_value == 0.5
+        assert result.all_trials[0]["command"] == "python train.py --model lstm"
 
     @patch("tiny_lab.optimize.subprocess.run")
     def test_with_search_space(self, mock_run, tmp_path):
@@ -106,6 +107,7 @@ class TestRunOptimize:
         )
         assert result.n_trials == 3
         assert result.best_value == 0.3
+        assert all("--lr" in trial["command"] for trial in result.all_trials)
         assert mock_run.call_count == 3
 
     @patch("tiny_lab.optimize.subprocess.run")
