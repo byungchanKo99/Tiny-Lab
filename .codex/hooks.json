@@ -1,0 +1,36 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "apply_patch|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/state_gate.py",
+            "statusMessage": "tiny-lab: checking state gate",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "apply_patch|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/state_advance.py",
+            "statusMessage": "tiny-lab: checking state advance",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/ref_verify.py",
+            "statusMessage": "tiny-lab: verifying references",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}
